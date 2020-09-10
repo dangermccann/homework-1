@@ -186,16 +186,21 @@ void OptiXTracer::InitProgram() {
 	OptixPipelineCompileOptions pipeline_compile_options = {};
 	OptixModuleCompileOptions module_compile_options = {};
 	module_compile_options.maxRegisterCount = OPTIX_COMPILE_DEFAULT_MAX_REGISTER_COUNT;
+#ifdef _DEBUG
+	module_compile_options.optLevel = OPTIX_COMPILE_OPTIMIZATION_LEVEL_0;
+	module_compile_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_FULL;
+#else
 	module_compile_options.optLevel = OPTIX_COMPILE_OPTIMIZATION_DEFAULT;
 	module_compile_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_LINEINFO;
+#endif
+
 
 	pipeline_compile_options.usesMotionBlur = false;
 	pipeline_compile_options.traversableGraphFlags = OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_GAS;
 	pipeline_compile_options.numPayloadValues = 3;
 	pipeline_compile_options.numAttributeValues = 3;
-	pipeline_compile_options.exceptionFlags = OPTIX_EXCEPTION_FLAG_NONE;  // TODO: should be OPTIX_EXCEPTION_FLAG_STACK_OVERFLOW;
+	pipeline_compile_options.exceptionFlags = OPTIX_EXCEPTION_FLAG_DEBUG; // OPTIX_EXCEPTION_FLAG_NONE
 	pipeline_compile_options.pipelineLaunchParamsVariableName = "params";
-	//pipeline_compile_options.usesPrimitiveTypeFlags = OPTIX_PRIMITIVE_TYPE_FLAGS_TRIANGLE;
 
 	std::string cu, ptx;
 	readCU("first.cu", cu);
@@ -296,7 +301,7 @@ void OptiXTracer::InitProgram() {
 	//
 	// Link pipeline
 	//
-	const uint32_t    max_trace_depth = 0;
+	const uint32_t    max_trace_depth = 10;
 	OptixProgramGroup program_groups[] = { 
 		raygen_prog_group, miss_prog_group, 
 		hitgroup_prog_primative, 
@@ -306,7 +311,11 @@ void OptiXTracer::InitProgram() {
 
 	OptixPipelineLinkOptions pipeline_link_options = {};
 	pipeline_link_options.maxTraceDepth = max_trace_depth;
+#ifdef _DEBUG
 	pipeline_link_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_FULL;
+#else
+	pipeline_link_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_LINEINFO;
+#endif
 	sizeof_log = sizeof(log);
 	OPTIX_CHECK_LOG(optixPipelineCreate(
 		context,
@@ -373,22 +382,30 @@ void OptiXTracer::InitSBT(const Scene & scene)
 
 	copyToDevice(&rg_sbt, raygen_record_size, raygen_record);
 
+	const size_t numRecs = (scene.tris.size() + scene.spheres.size()) * RAY_TYPE_COUNT;
 
 
 	// Create data that is sent to miss function 
-	MissSbtRecord ms_sbt = {};
-	//ms_sbt.data = { 0.3f, 0.1f, 0.2f };
-	ms_sbt.data = { 0, 0, 0 };
-	OPTIX_CHECK(optixSbtRecordPackHeader(miss_prog_group, &ms_sbt));
-
 	CUdeviceptr miss_record;
 	const size_t miss_record_size = sizeof(MissSbtRecord);
 
-	copyToDevice(&ms_sbt, miss_record_size, miss_record);
+	std::vector<HitGroupSbtRecord> miss_sbts;
+	miss_sbts.resize(numRecs);
+
+	for (int i = 0; i < numRecs; i++)
+	{
+		miss_sbts[i] = {};
+		miss_sbts[i].data = { 0, 0, 0 };
+		OPTIX_CHECK(optixSbtRecordPackHeader(miss_prog_group, &miss_sbts[i]));
+	}
+
+	copyToDevice(miss_sbts.data() , miss_record_size * numRecs, miss_record);
+
+
+
 
 
 	// Create data that is sent to hit group function 
-	const size_t numRecs = (scene.tris.size() + scene.spheres.size()) * RAY_TYPE_COUNT;
 	CUdeviceptr hitgroup_record;
 	size_t      hitgroup_record_size = sizeof(HitGroupSbtRecord);
 
@@ -447,7 +464,7 @@ void OptiXTracer::InitSBT(const Scene & scene)
 	sbt.raygenRecord = raygen_record;
 	sbt.missRecordBase = miss_record;
 	sbt.missRecordStrideInBytes = sizeof(MissSbtRecord);
-	sbt.missRecordCount = 1;
+	sbt.missRecordCount = numRecs;
 	sbt.hitgroupRecordBase = hitgroup_record;
 	sbt.hitgroupRecordStrideInBytes = sizeof(HitGroupSbtRecord);
 	sbt.hitgroupRecordCount = numRecs;
@@ -531,8 +548,6 @@ void OptiXTracer::SetupLights(const Scene & scene)
 		idx++;
 	}
 	
-	// TODO: cudaFree this?
-	CUdeviceptr d_lights;
 	copyToDevice(lights.data(), lights.size()*sizeof(DLight), d_lights);
 
 
@@ -565,7 +580,6 @@ void PopulateBuildInput(int buildOffset, int count, std::vector<OptixAabb> &aabb
 void OptiXTracer::BuildPrimativeGAS(const Scene & scene) 
 {
 	OptixTraversableHandle gas_handle;
-	CUdeviceptr            d_gas_output_buffer;
 	{
 		OptixAccelBuildOptions accel_options = {};
 		accel_options.buildFlags = OPTIX_BUILD_FLAG_ALLOW_COMPACTION;
@@ -892,6 +906,7 @@ void OptiXTracer::Fill(COLORREF* arr)
 	}
 
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(device_pixels)));
+	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(d_param)));
 
 }
 
@@ -901,7 +916,8 @@ void OptiXTracer::Cleanup()
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(sbt.raygenRecord)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(sbt.missRecordBase)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(sbt.hitgroupRecordBase)));
-
+	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(d_lights)));
+	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(d_gas_output_buffer)));
 	OPTIX_CHECK(optixPipelineDestroy(pipeline));
 
 	OPTIX_CHECK(optixProgramGroupDestroy(hitgroup_prog_primative));
