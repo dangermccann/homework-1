@@ -156,7 +156,7 @@
       <AdditionalIncludeDirectories>C:\ProgramData\NVIDIA Corporation\OptiX SDK 7.1.0\include;C:\ProgramData\NVIDIA Corporation\OptiX SDK 7.1.0\SDK\cuda;C:\ProgramData\NVIDIA Corporation\OptiX SDK 7.1.0\SDK;C:\ProgramData\NVIDIA Corporation\OptiX SDK 7.1.0\SDK\build\include;C:\ProgramData\NVIDIA Corporation\OptiX SDK 7.1.0\SDK\build;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.0\include;C:\ProgramData\NVIDIA Corporation\OptiX SDK 7.1.0\SDK\support\imgui\..;C:\ProgramData\NVIDIA Corporation\OptiX SDK 7.1.0\SDK\support\GLFW\include;C:\ProgramData\NVIDIA Corporation\OptiX SDK 7.1.0\SDK\support\.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
-      <SubSystem>Windows</SubSystem>
+      <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>

@@ -17,6 +17,7 @@ HINSTANCE hInst;                                // current instance
 WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
 WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
 LPCTSTR DefaultInputFile = L"test.txt";
+LPCTSTR fileName;
 
 // Forward declarations of functions included in this code module:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
@@ -29,12 +30,10 @@ int					LoadScene(LPCTSTR file);
 void				ShowError(int err);
 int					SaveImage(const char* filename, int width, int height, COLORREF* colorBuffer);
 DWORD WINAPI		TracerThread(LPVOID lpParam);
-DWORD WINAPI		ProgressThread(LPVOID lpParam);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
 
 
-RayTracer tracer;
 OptiXTracer optixTracer;
 
 Scene scene;
@@ -72,30 +71,22 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	InitStatusBar();
 	SetStatusText(L"Loading...");
 
+	DWORD threadId;
+	tracerThread = CreateThread(
+		NULL,                   // default security attributes
+		0,                      // use default stack size  
+		TracerThread,	        // thread function name
+		NULL,		            // argument to thread function 
+		0,                      // use default creation flags 
+		&threadId);		        // returns the thread identifier
+
+
 	tracerThread = 0;
 
-	LPCTSTR fileName = DefaultInputFile;
+	fileName = DefaultInputFile;
 	//LPCTSTR fileName = lpCmdLine;
 	//if(_tcslen(fileName) == 0)
 	//	fileName = DefaultInputFile;
-
-	int err = LoadScene(fileName);
-	if (err == 0) {
-		SetClientSize(scene.width, scene.height);
-
-		DWORD threadId;
-		tracerThread = CreateThread(
-			NULL,                   // default security attributes
-			0,                      // use default stack size  
-			TracerThread,	        // thread function name
-			NULL,		            // argument to thread function 
-			0,                      // use default creation flags 
-			&threadId);		        // returns the thread identifier
-
-	}
-	else {
-		ShowError(err);
-	}
 
     MSG msg;
 
@@ -112,7 +103,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	if(tracerThread != 0)
 		WaitForSingleObject(tracerThread, 3000);
 
-	//tracer.Cleanup();
 	optixTracer.Cleanup();
 
 	FreeImage_DeInitialise();
@@ -309,9 +299,8 @@ void ShowError(int err) {
 
 void DrawToScreen(HDC hdc) {
 	COLORREF *arr = (COLORREF*)calloc(scene.width * scene.height, sizeof(COLORREF));
-	
+
 	/* Filling array here */
-	//tracer.Fill(arr);
 	optixTracer.Fill(arr);
 
 
@@ -348,15 +337,17 @@ void DrawToScreen(HDC hdc) {
 
 DWORD WINAPI TracerThread(LPVOID lpParam) {
 
-	DWORD progresThreadId;
-	HANDLE progressThread = CreateThread( NULL, 0, ProgressThread, NULL, 0, &progresThreadId);
+	int err = LoadScene(fileName);
+	if (err == 0) {
+		SetClientSize(scene.width, scene.height);
+	}
+	else {
+		ShowError(err);
+	}
 
-	//tracer.Trace(scene);
 	optixTracer.Trace(scene);
 
 	RedrawWindow(hwndMain, NULL, NULL, RDW_INVALIDATE);
-
-	WaitForSingleObject(progressThread, 1000);
 
 	SetStatusText(L"Ready");
 
@@ -385,21 +376,6 @@ int SaveImage(const char* filename, int width, int height, COLORREF* colorBuffer
 	return FreeImage_Save(FIF_PNG, img, filename, 0);
 }
 
-
-
-DWORD WINAPI ProgressThread(LPVOID lpParam) {
-	/*
-	while(tracer.progress < 1) {
-		int progress = (int)(tracer.progress * 100.0f);
-		WCHAR buffer[100];
-		swprintf_s(buffer, L"Loading  |  Progress: %d%%", progress);
-		SetStatusText(buffer);
-		Sleep(500);
-	}
-	*/
-
-	return 0;
-}
 
 
 // Message handler for about box.

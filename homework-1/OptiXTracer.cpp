@@ -21,7 +21,6 @@
 #include <string>
 
 
-
 #ifdef max
 #undef max
 #endif
@@ -199,7 +198,12 @@ void OptiXTracer::InitProgram() {
 	pipeline_compile_options.traversableGraphFlags = OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_GAS;
 	pipeline_compile_options.numPayloadValues = 3;
 	pipeline_compile_options.numAttributeValues = 3;
+#ifdef _DEBUG 
 	pipeline_compile_options.exceptionFlags = OPTIX_EXCEPTION_FLAG_DEBUG; // OPTIX_EXCEPTION_FLAG_NONE
+#else
+	pipeline_compile_options.exceptionFlags = OPTIX_EXCEPTION_FLAG_STACK_OVERFLOW; // OPTIX_EXCEPTION_FLAG_NONE
+#endif
+
 	pipeline_compile_options.pipelineLaunchParamsVariableName = "params";
 
 	std::string cu, ptx;
@@ -832,8 +836,10 @@ void OptiXTracer::BuildPrimativeGAS(const Scene & scene)
 
 void OptiXTracer::Trace(const Scene & scene)
 {
-	params.image_width = width;
-	params.image_height = height;
+	width = scene.width;
+	height = scene.height;
+	params.image_width = scene.width;
+	params.image_height = scene.height;
 	params.depth = scene.maxDepth;
 	SetupCamera(scene);
 	SetupLights(scene);
