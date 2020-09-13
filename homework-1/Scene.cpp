@@ -10,6 +10,7 @@ Scene::Scene()
 	width = RT_WIDTH;
 	height = RT_HEIGHT;
 	maxDepth = 5;
+	integrator = "raytracer";
 }
 
 
@@ -21,7 +22,7 @@ int Scene::Parse(LPCWSTR path)
 {
 	ifstream in;
 	string str, cmd;
-	float values[10];
+	float values[16];
 
 	stack<Transform> transforms;
 	transforms.push(Transform());
@@ -47,6 +48,14 @@ int Scene::Parse(LPCWSTR path)
 						height = (int)values[1];
 					}
 					else { return ERR_INVALID_FILE; }
+				}
+				else if (cmd == "integrator") {
+					s >> integrator;
+
+					if (integrator != "raytracer") {
+						// Original integrator called for default value of ambient light.
+						material.ambient = Color3(0, 0, 0);
+					}
 				}
 				else if (cmd == "maxdepth") {
 					if (ReadVals(s, 1, values)) {
@@ -191,6 +200,20 @@ int Scene::Parse(LPCWSTR path)
 						atten.z = values[2];
 					}
 					else { return ERR_INVALID_FILE; }
+				}
+				else if (cmd == "quadLight") {
+					if (ReadVals(s, 12, values)) {
+						QuadLight ql = QuadLight();
+						ql.a = Vector3(values[0], values[1], values[2]);
+						ql.ab = Vector3(values[3], values[4], values[5]);
+						ql.ac = Vector3(values[6], values[7], values[8]);
+						ql.intensity = Color3(values[9], values[10], values[11]);
+
+						ql.material.emission = ql.intensity;
+
+
+						quadLights.push_back(ql);
+					}
 				}
 				else if (cmd == "ambient") {
 					if (ReadVals(s, 3, values)) {

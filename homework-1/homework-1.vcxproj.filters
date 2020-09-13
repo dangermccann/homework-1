@@ -89,40 +89,61 @@
     <Filter Include="Resource Files">
       <UniqueIdentifier>{141f1b25-222f-4d24-8305-a0d4eecc04cd}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Scenes">
-      <UniqueIdentifier>{294a4be1-fcd0-438e-8aee-6cb992060404}</UniqueIdentifier>
+    <Filter Include="HW2 Scenes">
+      <UniqueIdentifier>{a8ff1bcc-3177-4338-88c2-8ea4db922926}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="HW1 Scenes">
+      <UniqueIdentifier>{94a678b9-72b8-4157-b50e-233023b3af24}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\scenes\scene4-ambient.test">
-      <Filter>Scenes</Filter>
+    <None Include="..\hw2-scenes\analytic.test">
+      <Filter>HW2 Scenes</Filter>
     </None>
-    <None Include="..\scenes\scene4-diffuse.test">
-      <Filter>Scenes</Filter>
+    <None Include="..\hw2-scenes\cornell.test">
+      <Filter>HW2 Scenes</Filter>
     </None>
-    <None Include="..\scenes\scene4-emission.test">
-      <Filter>Scenes</Filter>
+    <None Include="..\hw2-scenes\direct3x3.test">
+      <Filter>HW2 Scenes</Filter>
     </None>
-    <None Include="..\scenes\scene4-specular.test">
-      <Filter>Scenes</Filter>
+    <None Include="..\hw2-scenes\direct9.test">
+      <Filter>HW2 Scenes</Filter>
     </None>
-    <None Include="..\scenes\scene5.test">
-      <Filter>Scenes</Filter>
+    <None Include="..\hw2-scenes\dragon.test">
+      <Filter>HW2 Scenes</Filter>
     </None>
-    <None Include="..\scenes\scene6.test">
-      <Filter>Scenes</Filter>
-    </None>
-    <None Include="..\scenes\scene7.test">
-      <Filter>Scenes</Filter>
+    <None Include="..\hw2-scenes\sphere.test">
+      <Filter>HW2 Scenes</Filter>
     </None>
     <None Include="..\testscenes\scene1.test">
-      <Filter>Scenes</Filter>
+      <Filter>HW1 Scenes</Filter>
     </None>
     <None Include="..\testscenes\scene2.test">
-      <Filter>Scenes</Filter>
+      <Filter>HW1 Scenes</Filter>
     </None>
     <None Include="..\testscenes\scene3.test">
-      <Filter>Scenes</Filter>
+      <Filter>HW1 Scenes</Filter>
+    </None>
+    <None Include="..\scenes\scene4-ambient.test">
+      <Filter>HW1 Scenes</Filter>
+    </None>
+    <None Include="..\scenes\scene4-diffuse.test">
+      <Filter>HW1 Scenes</Filter>
+    </None>
+    <None Include="..\scenes\scene4-emission.test">
+      <Filter>HW1 Scenes</Filter>
+    </None>
+    <None Include="..\scenes\scene4-specular.test">
+      <Filter>HW1 Scenes</Filter>
+    </None>
+    <None Include="..\scenes\scene5.test">
+      <Filter>HW1 Scenes</Filter>
+    </None>
+    <None Include="..\scenes\scene6.test">
+      <Filter>HW1 Scenes</Filter>
+    </None>
+    <None Include="..\scenes\scene7.test">
+      <Filter>HW1 Scenes</Filter>
     </None>
   </ItemGroup>
   <ItemGroup>

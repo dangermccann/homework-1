@@ -386,7 +386,7 @@ void OptiXTracer::InitSBT(const Scene & scene)
 
 	copyToDevice(&rg_sbt, raygen_record_size, raygen_record);
 
-	const size_t numRecs = (scene.tris.size() + scene.spheres.size()) * RAY_TYPE_COUNT;
+	const size_t numRecs = (scene.tris.size() + scene.spheres.size() + scene.quadLights.size()*2) * RAY_TYPE_COUNT;
 
 
 	// Create data that is sent to miss function 
@@ -459,6 +459,44 @@ void OptiXTracer::InitSBT(const Scene & scene)
 		memcpy(&hg_sbts[idx], &hg_sbts[idx - 1], hitgroup_record_size);
 		OPTIX_CHECK(optixSbtRecordPackHeader(hitgroup_prog_occlusion, &hg_sbts[idx]));
 		idx++;
+	}
+
+
+	std::list<QuadLight>::const_iterator it4;
+	for (it4 = scene.quadLights.begin(); it4 != scene.quadLights.end(); ++it4)
+	{
+		QuadLight ql = *it4;
+		Vector3 v1, v2, v3, v4;
+		ql.Verticies(v1, v2, v3, v4);
+
+		hg_sbts[idx].data.primativeType = TRIANGLE;
+		hg_sbts[idx].data.verticies[0] = vtf3(v1);
+		hg_sbts[idx].data.verticies[1] = vtf3(v2);
+		hg_sbts[idx].data.verticies[2] = vtf3(v3);
+		PopulateHitGroupRecord(hg_sbts[idx], ql);
+
+		OPTIX_CHECK(optixSbtRecordPackHeader(hitgroup_prog_primative, &hg_sbts[idx]));
+		idx++;
+
+		memcpy(&hg_sbts[idx], &hg_sbts[idx - 1], hitgroup_record_size);
+		OPTIX_CHECK(optixSbtRecordPackHeader(hitgroup_prog_occlusion, &hg_sbts[idx]));
+		idx++;
+
+
+
+		hg_sbts[idx].data.primativeType = TRIANGLE;
+		hg_sbts[idx].data.verticies[0] = vtf3(v3);
+		hg_sbts[idx].data.verticies[1] = vtf3(v4);
+		hg_sbts[idx].data.verticies[2] = vtf3(v1);
+		PopulateHitGroupRecord(hg_sbts[idx], ql);
+
+		OPTIX_CHECK(optixSbtRecordPackHeader(hitgroup_prog_primative, &hg_sbts[idx]));
+		idx++;
+
+		memcpy(&hg_sbts[idx], &hg_sbts[idx - 1], hitgroup_record_size);
+		OPTIX_CHECK(optixSbtRecordPackHeader(hitgroup_prog_occlusion, &hg_sbts[idx]));
+		idx++;
+
 	}
 
 
@@ -552,11 +590,39 @@ void OptiXTracer::SetupLights(const Scene & scene)
 		idx++;
 	}
 	
-	copyToDevice(lights.data(), lights.size()*sizeof(DLight), d_lights);
+	if(lights.size() > 0)
+		copyToDevice(lights.data(), lights.size()*sizeof(DLight), d_lights);
+	else 
+		d_lights = 0;
 
 
 	params.lights = reinterpret_cast<uchar4*>(d_lights);
 	params.light_count = scene.lights.size();
+
+
+	// Quad lights
+	std::vector<DQuadLight> quad_lights;
+	quad_lights.resize(scene.quadLights.size());
+
+	std::list<QuadLight>::const_iterator it3;
+	idx = 0;
+	for (it3 = scene.quadLights.begin(); it3 != scene.quadLights.end(); ++it3) {
+		QuadLight ql = *it3;
+		quad_lights[idx].a = vtf3(ql.a);
+		quad_lights[idx].ab = vtf3(ql.ab);
+		quad_lights[idx].ac = vtf3(ql.ac);
+		quad_lights[idx].intensity = ctf3(ql.intensity);
+
+		idx++;
+	}
+
+	if (quad_lights.size() > 0)
+		copyToDevice(quad_lights.data(), quad_lights.size() * sizeof(DQuadLight), d_quad_lights);
+	else
+		d_quad_lights = 0;
+
+	params.quadLights = reinterpret_cast<uchar4*>(d_quad_lights);
+	params.quad_light_count = scene.quadLights.size();
 }
 
 
@@ -581,6 +647,30 @@ void PopulateBuildInput(int buildOffset, int count, std::vector<OptixAabb> &aabb
 	build_inputs[buildOffset].customPrimitiveArray.primitiveIndexOffset = primitiveIndexOffset;
 }
 
+void BuildTriangleAABB(Vector3 v1, Vector3 v2, Vector3 v3, Transform transform, 
+	int count, std::vector<OptixAabb>& aabbs)
+{
+	Vector3 boxMin, boxMax;
+
+	boxMin.x = minf(minf(v1.x, v2.x), v3.x);
+	boxMin.y = minf(minf(v1.y, v2.y), v3.y);
+	boxMin.z = minf(minf(v1.z, v2.z), v3.z);
+	boxMax.x = maxf(maxf(v1.x, v2.x), v3.x);
+	boxMax.y = maxf(maxf(v1.y, v2.y), v3.y);
+	boxMax.x = maxf(maxf(v1.z, v2.z), v3.z);
+
+
+	boxMin = boxMin.ApplyTransformation(transform);
+	boxMax = boxMax.ApplyTransformation(transform);
+
+	aabbs[count].minX = minf(boxMin.x, boxMax.x);
+	aabbs[count].minY = minf(boxMin.y, boxMax.y);
+	aabbs[count].minZ = minf(boxMin.z, boxMax.z);
+	aabbs[count].maxX = maxf(boxMin.x, boxMax.x);
+	aabbs[count].maxY = maxf(boxMin.y, boxMax.y);
+	aabbs[count].maxZ = maxf(boxMin.z, boxMax.z);
+}
+
 void OptiXTracer::BuildPrimativeGAS(const Scene & scene) 
 {
 	OptixTraversableHandle gas_handle;
@@ -592,8 +682,9 @@ void OptiXTracer::BuildPrimativeGAS(const Scene & scene)
 
 		uint32_t nSpheres = scene.spheres.size();
 		uint32_t nTris = scene.tris.size();
-		uint32_t nObjects = nSpheres + nTris;
-		uint32_t nInputs = scene.sphereInputs + scene.triInputs;
+		uint32_t nQuadLights = scene.quadLights.size();
+		uint32_t nObjects = nSpheres + nTris + 2*nQuadLights;
+		uint32_t nInputs = scene.sphereInputs + scene.triInputs + nQuadLights;
 
 		std::vector<OptixAabb> aabbs;
 		aabbs.resize(nObjects);
@@ -695,27 +786,8 @@ void OptiXTracer::BuildPrimativeGAS(const Scene & scene)
 			Vector3 v1 = scene.verticies[tri.one];
 			Vector3 v2 = scene.verticies[tri.two];
 			Vector3 v3 = scene.verticies[tri.three];
-			Vector3 boxMin, boxMax;
-
-			boxMin.x = minf(minf(v1.x, v2.x), v3.x);
-			boxMin.y = minf(minf(v1.y, v2.y), v3.y);
-			boxMin.z = minf(minf(v1.z, v2.z), v3.z);
-			boxMax.x = maxf(maxf(v1.x, v2.x), v3.x);
-			boxMax.y = maxf(maxf(v1.y, v2.y), v3.y);
-			boxMax.x = maxf(maxf(v1.z, v2.z), v3.z);
-
-
-			boxMin = boxMin.ApplyTransformation(tri.transform);
-			boxMax = boxMax.ApplyTransformation(tri.transform);
-
-			aabbs[count].minX = minf(boxMin.x, boxMax.x);
-			aabbs[count].minY = minf(boxMin.y, boxMax.y);
-			aabbs[count].minZ = minf(boxMin.z, boxMax.z);
-			aabbs[count].maxX = maxf(boxMin.x, boxMax.x);
-			aabbs[count].maxY = maxf(boxMin.y, boxMax.y);
-			aabbs[count].maxZ = maxf(boxMin.z, boxMax.z);
-
-
+			
+			BuildTriangleAABB(v1, v2, v3, tri.transform, count, aabbs);
 
 			count++;
 			idx++;
@@ -723,6 +795,29 @@ void OptiXTracer::BuildPrimativeGAS(const Scene & scene)
 		}
 
 		if (idx > 0 && count != 0) {
+			PopulateBuildInput(buildOffset, count, aabbs, d_aabb_buffers,
+				sbt_index_offsets, d_sbt_index, aabb_input_flags, build_inputs, primitiveIndexOffset);
+
+			primitiveIndexOffset += count;
+			buildOffset++;
+		}
+
+		count = 0;
+		std::list<QuadLight>::const_iterator it3;
+		for (it3 = scene.quadLights.begin(); it3 != scene.quadLights.end(); ++it3)
+		{
+			QuadLight ql = *it3;
+			Vector3 v1, v2, v3, v4;
+			ql.Verticies(v1, v2, v3, v4);
+
+			aabb_input_flags[count] = OPTIX_GEOMETRY_FLAG_NONE;
+			sbt_index_offsets[count] = count;
+			BuildTriangleAABB(v1, v2, v3, Transform(), count++, aabbs);
+
+			aabb_input_flags[count] = OPTIX_GEOMETRY_FLAG_NONE;
+			sbt_index_offsets[count] = count;
+			BuildTriangleAABB(v3, v4, v1, Transform(), count++, aabbs);
+
 			PopulateBuildInput(buildOffset, count, aabbs, d_aabb_buffers,
 				sbt_index_offsets, d_sbt_index, aabb_input_flags, build_inputs, primitiveIndexOffset);
 		}
@@ -841,6 +936,14 @@ void OptiXTracer::Trace(const Scene & scene)
 	params.image_width = scene.width;
 	params.image_height = scene.height;
 	params.depth = scene.maxDepth;
+
+	if (scene.integrator == "raytracer") {
+		params.integrator = RAYTRACER;
+	}
+	else if (scene.integrator == "analyticdirect") {
+		params.integrator = ANALYTICDIRECT;
+	}
+
 	SetupCamera(scene);
 	SetupLights(scene);
 
@@ -923,6 +1026,7 @@ void OptiXTracer::Cleanup()
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(sbt.missRecordBase)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(sbt.hitgroupRecordBase)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(d_lights)));
+	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(d_quad_lights)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(d_gas_output_buffer)));
 	OPTIX_CHECK(optixPipelineDestroy(pipeline));
 

@@ -204,6 +204,12 @@
     <Text Include="test.txt" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\hw2-scenes\analytic.test" />
+    <None Include="..\hw2-scenes\cornell.test" />
+    <None Include="..\hw2-scenes\direct3x3.test" />
+    <None Include="..\hw2-scenes\direct9.test" />
+    <None Include="..\hw2-scenes\dragon.test" />
+    <None Include="..\hw2-scenes\sphere.test" />
     <None Include="..\scenes\scene4-ambient.test" />
     <None Include="..\scenes\scene4-diffuse.test" />
     <None Include="..\scenes\scene4-emission.test" />

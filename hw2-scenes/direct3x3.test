@@ -1,6 +1,8 @@
 size 640 480
-integrator analyticdirect
-output analytic.png
+integrator direct
+lightsamples 9
+lightstratify on
+output direct3x3.png
 
 camera 0.0001 0 -4  0 0 0  0 1 0  45
 

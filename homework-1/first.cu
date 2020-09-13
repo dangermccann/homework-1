@@ -228,6 +228,8 @@ extern "C" __global__ void __miss__ms()
 
 void shade(float3 N, HitGroupData* hit_data)
 {
+	const float  PI = 3.1415927f;
+
 	const float3 orig = optixGetWorldRayOrigin();
 	const float3 dir = optixGetWorldRayDirection();
 	const float  t = optixGetRayTmax();
@@ -292,6 +294,35 @@ void shade(float3 N, HitGroupData* hit_data)
 		c += V * intensity * light.color * (lambert + phong);
 	}
 
+
+	DQuadLight* dql = (DQuadLight*)params.quadLights;
+
+	for (int j = 0; j < params.quad_light_count; j++)
+	{
+		DQuadLight ql = dql[j];
+		const int vertexCount = 4;
+		float3 verticies[4];
+		verticies[0] = ql.a;
+		verticies[1] = ql.a + ql.ab;
+		verticies[2] = ql.a + ql.ab + ql.ac;
+		verticies[3] = ql.a + ql.ac;
+
+		float3 irradiance = make_float3(0);
+
+		for (int i = 0; i < vertexCount; i++) {
+			float3 v1 = verticies[i];
+			float3 v2 = verticies[(i + 1) % vertexCount];
+			float theta = acosf( dot( normalize(v1 - P), normalize(v2 - P) ) );
+			float3 gamma = normalize(cross(v1 - P, v2 - P));
+
+			irradiance += theta * gamma;
+		}
+
+		irradiance *= 0.5f;
+
+		c += (hit_data->diffuse / PI) * ql.intensity * dot(irradiance, -1 * N);
+	}
+
 	TraceData* td = getTraceData();
 	
 
@@ -309,8 +340,12 @@ void shade(float3 N, HitGroupData* hit_data)
 		float3 reflOrigin = P - N * EPSILON;
 
 		// trace reflection
-		float3 reflColor = traceReflection(params.handle, reflOrigin, refl, td->depth + 1);
-		c += hit_data->specular * reflColor;
+		if (params.integrator == RAYTRACER)
+		{
+			float3 reflColor = traceReflection(params.handle, reflOrigin, refl, td->depth + 1);
+			c += hit_data->specular * reflColor;
+		}
+
 	} 
 	
 	td->color = c;

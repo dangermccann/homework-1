@@ -16,17 +16,26 @@ enum PrimativeType
 	TRIANGLE = 1
 };
 
+enum IntegratorType 
+{
+	RAYTRACER,
+	ANALYTICDIRECT,
+};
+
 struct Params
 {
 	uchar4* image;
 	uchar4* lights;
+	uchar4* quadLights;
 	unsigned int light_count;
+	unsigned int quad_light_count;
 	unsigned int image_width;
 	unsigned int           image_height;
 	float3                 cam_eye;
 	float3                 cam_u, cam_v, cam_w;
 	OptixTraversableHandle handle;
-	int depth;
+	unsigned int depth;
+	unsigned int integrator;
 };
 
 
@@ -69,3 +78,7 @@ struct DLight {
 	float atten0, atten1, atten2;
 };
 
+struct DQuadLight {
+	float3 a, ab, ac;
+	float3 intensity;
+};

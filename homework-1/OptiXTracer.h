@@ -43,7 +43,7 @@ private:
 	OptixPipeline pipeline = nullptr;
 	OptixShaderBindingTable sbt = {};
 	cudaDeviceProp deviceProps;
-	CUdeviceptr d_lights;
+	CUdeviceptr d_lights, d_quad_lights;
 	Params params;
 	CUdeviceptr d_gas_output_buffer;
 

@@ -60,6 +60,20 @@ public:
 	float atten0, atten1, atten2;
 };
 
+class QuadLight : public Geometry {
+public:
+	Vector3 a, ab, ac;
+	Color3 intensity;
+
+	void Verticies(Vector3 &v1, Vector3 &v2, Vector3 &v3, Vector3 &v4)
+	{
+		v1 = a;
+		v2 = v1 + ab;
+		v3 = v1 + ab + ac;
+		v4 = v1 + ac;
+	}
+};
+
 #define ERR_INVALID_FILE 1
 #define ERR_FILE_NOT_FOUND 2
 
@@ -68,6 +82,7 @@ class Scene
 public:
 	int width, height, maxDepth;	
 	std::string outputFileName;
+	std::string integrator;
 	Scene();
 	virtual ~Scene();
 
@@ -77,6 +92,7 @@ public:
 	std::vector<Vector3> verticies;
 	std::list<Tri> tris;
 	std::list<Light> lights;
+	std::list<QuadLight> quadLights;
 	Camera camera;
 
 	unsigned int triInputs;
