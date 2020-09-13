@@ -951,19 +951,9 @@ void OptiXTracer::Trace(const Scene & scene)
 
 	InitSBT(scene);
 
-	progress = 1;
-	
-}
-
-void OptiXTracer::Fill(COLORREF* arr) 
-{ 
-	if (progress < 1)
-		return;
-
 
 	uchar4* device_pixels = nullptr;
-	std::vector<uchar4>  host_pixels;
-	
+
 	CUDA_CHECK(cudaMalloc(
 		reinterpret_cast<void**>(&device_pixels), width*height * sizeof(uchar4)
 	));
@@ -996,7 +986,19 @@ void OptiXTracer::Fill(COLORREF* arr)
 		width*height * sizeof(uchar4),
 		cudaMemcpyDeviceToHost
 	));
+
+
+	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(device_pixels)));
+	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(d_param)));
+
+	progress = 1;
 	
+}
+
+void OptiXTracer::Fill(COLORREF* arr) 
+{ 
+	if (progress < 1)
+		return;
 
 	// Copy pixels to buffer to be sent to device context
 	for (int y = 0; y < height; y++) {
@@ -1013,10 +1015,6 @@ void OptiXTracer::Fill(COLORREF* arr)
 			arr[offset] = c;
 		}
 	}
-
-	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(device_pixels)));
-	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(d_param)));
-
 }
 
 

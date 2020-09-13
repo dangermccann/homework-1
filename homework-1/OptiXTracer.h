@@ -46,6 +46,7 @@ private:
 	CUdeviceptr d_lights, d_quad_lights;
 	Params params;
 	CUdeviceptr d_gas_output_buffer;
+	std::vector<uchar4>  host_pixels;
 
 	void InitProgram();
 	void InitSBT(const Scene & scene);
