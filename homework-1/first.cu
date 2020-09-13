@@ -249,13 +249,13 @@ void shade(float3 N, HitGroupData* hit_data)
 		float LDist;
 		if (light.type == 0) // point
 		{
-			L = normalize(P - light.position);
-			LDist = length(P - light.position);
+			L = normalize(light.position - P);
+			LDist = length(light.position - P);
 			intensity = 1.0f / (light.atten0 + light.atten1 * LDist + light.atten2 * LDist * LDist);
 		}
 		else // directional
 		{
-			L = normalize(light.position * -1.0f);
+			L = normalize(light.position);
 			LDist = 1e16f;
 		}
 
@@ -264,7 +264,7 @@ void shade(float3 N, HitGroupData* hit_data)
 		LdotN = LdotN < 0 ? 0 : LdotN;
 		float3 lambert = hit_data->diffuse * LdotN;
 
-		float3 H = normalize(L + (normalize(P - orig)));
+		float3 H = normalize(L + (normalize(orig - P)));
 		float HdotN = dot(H, N);
 		HdotN = (HdotN < 0) ? 0 : HdotN;
 		float3 phong = make_float3(0);
@@ -274,13 +274,8 @@ void shade(float3 N, HitGroupData* hit_data)
 
 		// calculate shadow
 		float V = 1.0f;
-		float3 occlusionOrig = P - N * EPSILON;
-		float3 occlusionDir = L * -1.0f;
-
-		// Since we don't intersect the backs of triangles, make sure the normal and the 
-		// ray direction are pointing in opposite directions.  
-		if (dot(occlusionDir, N) > 0)
-			occlusionDir *= -1.0f;
+		float3 occlusionOrig = P + N * EPSILON;
+		float3 occlusionDir = L;
 
 		const bool occluded = traceOcclusion(
 			params.handle, occlusionOrig, occlusionDir,
@@ -320,7 +315,7 @@ void shade(float3 N, HitGroupData* hit_data)
 
 		irradiance *= 0.5f;
 
-		c += (hit_data->diffuse / PI) * ql.intensity * dot(irradiance, -1 * N);
+		c += (hit_data->diffuse / PI) * ql.intensity * dot(irradiance, N);
 	}
 
 	TraceData* td = getTraceData();
@@ -332,12 +327,11 @@ void shade(float3 N, HitGroupData* hit_data)
 	{
 		td->origin = P;
 
-
 		float3 r = normalize(orig - P);
 		float3 refl = N * 2.0f * dot(r, N) - r;
 		refl = normalize(refl);
 		
-		float3 reflOrigin = P - N * EPSILON;
+		float3 reflOrigin = P + N * EPSILON;
 
 		// trace reflection
 		if (params.integrator == RAYTRACER)
@@ -418,6 +412,10 @@ bool intersect_triangle(HitGroupData* hg_data, float3 orig, float3 dir, float3 &
 	if (dot(normal, alpha) < 0)
 		return false;
 
+	// TODO: This I don't fully understand.  But I know that the normal is facing the wrong direction
+	// if it is not reversed here.   
+	normal *= -1;
+
 	return true;
 }
 
@@ -450,7 +448,7 @@ bool intersect_sphere(HitGroupData* hg_data, float3 orig, float3 dir, float3 &no
 
 		if (hit > 0) {
 			float3 hitPosition = orig + dir * t;
-			normal = normalize(C - hitPosition);
+			normal = normalize(hitPosition - C);
 			return true;
 		}
 	}
