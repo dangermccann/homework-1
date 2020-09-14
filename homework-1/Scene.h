@@ -80,7 +80,8 @@ public:
 class Scene
 {
 public:
-	int width, height, maxDepth;	
+	int width, height, maxDepth, lightSamples;
+	int lightStratify;
 	std::string outputFileName;
 	std::string integrator;
 	Scene();

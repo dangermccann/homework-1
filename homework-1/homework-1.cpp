@@ -71,6 +71,12 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	InitStatusBar();
 	SetStatusText(L"Loading...");
 
+	fileName = DefaultInputFile;
+	//LPCTSTR fileName = lpCmdLine;
+	//if(_tcslen(fileName) == 0)
+	//	fileName = DefaultInputFile;
+
+
 	DWORD threadId;
 	tracerThread = CreateThread(
 		NULL,                   // default security attributes
@@ -81,12 +87,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 		&threadId);		        // returns the thread identifier
 
 
-	tracerThread = 0;
-
-	fileName = DefaultInputFile;
-	//LPCTSTR fileName = lpCmdLine;
-	//if(_tcslen(fileName) == 0)
-	//	fileName = DefaultInputFile;
 
     MSG msg;
 
@@ -336,6 +336,8 @@ void DrawToScreen(HDC hdc) {
 
 
 DWORD WINAPI TracerThread(LPVOID lpParam) {
+	
+	SetStatusText(L"Parsing scene...");
 
 	int err = LoadScene(fileName);
 	if (err == 0) {
@@ -345,11 +347,25 @@ DWORD WINAPI TracerThread(LPVOID lpParam) {
 		ShowError(err);
 	}
 
+	SetStatusText(L"Launching trace...");
+
+	LARGE_INTEGER StartingTime, EndingTime, ElapsedMicroseconds, Frequency;
+	QueryPerformanceFrequency(&Frequency);
+	QueryPerformanceCounter(&StartingTime);
+
 	optixTracer.Trace(scene);
+
+	QueryPerformanceCounter(&EndingTime);
+	ElapsedMicroseconds.QuadPart = EndingTime.QuadPart - StartingTime.QuadPart;
+	ElapsedMicroseconds.QuadPart *= 1000000;
+	ElapsedMicroseconds.QuadPart /= Frequency.QuadPart;
+
 
 	RedrawWindow(hwndMain, NULL, NULL, RDW_INVALIDATE);
 
-	SetStatusText(L"Ready");
+	WCHAR szTemp[100];
+	wsprintf(szTemp, L"Complete in %I64d ms", ElapsedMicroseconds.QuadPart/1000);
+	SetStatusText(szTemp);
 
 	return 0;
 }

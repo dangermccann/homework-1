@@ -11,6 +11,8 @@ Scene::Scene()
 	height = RT_HEIGHT;
 	maxDepth = 5;
 	integrator = "raytracer";
+	lightSamples = 1;
+	lightStratify = 0;
 }
 
 
@@ -62,6 +64,19 @@ int Scene::Parse(LPCWSTR path)
 						maxDepth = (int) values[0];
 					}
 					else { return ERR_INVALID_FILE; }
+				}
+				else if (cmd == "lightsamples") {
+					if (ReadVals(s, 1, values)) {
+						lightSamples = (int)values[0];
+					}
+					else { return ERR_INVALID_FILE; }
+				}
+				else if (cmd == "lightstratify") {
+					std::string onOff;
+					s >> onOff;
+
+					if (onOff == "on")
+						lightStratify = 1;
 				}
 				else if (cmd == "output") {
 					s >> outputFileName;

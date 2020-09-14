@@ -41,8 +41,8 @@
   "-default-device", \
   "-rdc", \
   "true", \
-  "-D__x86_64", \
-  "-G"
+  "-D__x86_64" //, \
+  // "-G"
 std::string g_nvrtcLog;
 
 
@@ -186,8 +186,8 @@ void OptiXTracer::InitProgram() {
 	OptixModuleCompileOptions module_compile_options = {};
 	module_compile_options.maxRegisterCount = OPTIX_COMPILE_DEFAULT_MAX_REGISTER_COUNT;
 #ifdef _DEBUG
-	module_compile_options.optLevel = OPTIX_COMPILE_OPTIMIZATION_LEVEL_0;
-	module_compile_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_FULL;
+	module_compile_options.optLevel = OPTIX_COMPILE_OPTIMIZATION_DEFAULT; // OPTIX_COMPILE_OPTIMIZATION_LEVEL_0;
+	module_compile_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_NONE; // OPTIX_COMPILE_DEBUG_LEVEL_FULL;
 #else
 	module_compile_options.optLevel = OPTIX_COMPILE_OPTIMIZATION_DEFAULT;
 	module_compile_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_LINEINFO;
@@ -199,7 +199,7 @@ void OptiXTracer::InitProgram() {
 	pipeline_compile_options.numPayloadValues = 3;
 	pipeline_compile_options.numAttributeValues = 3;
 #ifdef _DEBUG 
-	pipeline_compile_options.exceptionFlags = OPTIX_EXCEPTION_FLAG_DEBUG; // OPTIX_EXCEPTION_FLAG_NONE
+	pipeline_compile_options.exceptionFlags = OPTIX_EXCEPTION_FLAG_NONE; // OPTIX_EXCEPTION_FLAG_DEBUG; // OPTIX_EXCEPTION_FLAG_NONE
 #else
 	pipeline_compile_options.exceptionFlags = OPTIX_EXCEPTION_FLAG_STACK_OVERFLOW; // OPTIX_EXCEPTION_FLAG_NONE
 #endif
@@ -316,7 +316,7 @@ void OptiXTracer::InitProgram() {
 	OptixPipelineLinkOptions pipeline_link_options = {};
 	pipeline_link_options.maxTraceDepth = max_trace_depth;
 #ifdef _DEBUG
-	pipeline_link_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_FULL;
+	pipeline_link_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_NONE; // OPTIX_COMPILE_DEBUG_LEVEL_FULL;
 #else
 	pipeline_link_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_LINEINFO;
 #endif
@@ -469,7 +469,7 @@ void OptiXTracer::InitSBT(const Scene & scene)
 		Vector3 v1, v2, v3, v4;
 		ql.Verticies(v1, v2, v3, v4);
 
-		hg_sbts[idx].data.primativeType = TRIANGLE;
+		hg_sbts[idx].data.primativeType = QUADLIGHT;
 		hg_sbts[idx].data.verticies[0] = vtf3(v1);
 		hg_sbts[idx].data.verticies[1] = vtf3(v2);
 		hg_sbts[idx].data.verticies[2] = vtf3(v3);
@@ -484,7 +484,7 @@ void OptiXTracer::InitSBT(const Scene & scene)
 
 
 
-		hg_sbts[idx].data.primativeType = TRIANGLE;
+		hg_sbts[idx].data.primativeType = QUADLIGHT;
 		hg_sbts[idx].data.verticies[0] = vtf3(v3);
 		hg_sbts[idx].data.verticies[1] = vtf3(v4);
 		hg_sbts[idx].data.verticies[2] = vtf3(v1);
@@ -802,10 +802,10 @@ void OptiXTracer::BuildPrimativeGAS(const Scene & scene)
 			buildOffset++;
 		}
 
-		count = 0;
 		std::list<QuadLight>::const_iterator it3;
 		for (it3 = scene.quadLights.begin(); it3 != scene.quadLights.end(); ++it3)
 		{
+			count = 0;
 			QuadLight ql = *it3;
 			Vector3 v1, v2, v3, v4;
 			ql.Verticies(v1, v2, v3, v4);
@@ -820,6 +820,9 @@ void OptiXTracer::BuildPrimativeGAS(const Scene & scene)
 
 			PopulateBuildInput(buildOffset, count, aabbs, d_aabb_buffers,
 				sbt_index_offsets, d_sbt_index, aabb_input_flags, build_inputs, primitiveIndexOffset);
+
+			primitiveIndexOffset += count;
+			buildOffset++;
 		}
 
 
@@ -943,6 +946,11 @@ void OptiXTracer::Trace(const Scene & scene)
 	else if (scene.integrator == "analyticdirect") {
 		params.integrator = ANALYTICDIRECT;
 	}
+	else if (scene.integrator == "direct") {
+		params.integrator = DIRECT;
+	}
+	params.light_samples = scene.lightSamples;
+	params.light_stratify = scene.lightStratify;
 
 	SetupCamera(scene);
 	SetupLights(scene);

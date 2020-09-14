@@ -13,13 +13,15 @@ enum RayType
 enum PrimativeType 
 {
 	SPHERE = 0,
-	TRIANGLE = 1
+	TRIANGLE = 1,
+	QUADLIGHT = 2
 };
 
 enum IntegratorType 
 {
 	RAYTRACER,
 	ANALYTICDIRECT,
+	DIRECT,
 };
 
 struct Params
@@ -36,6 +38,8 @@ struct Params
 	OptixTraversableHandle handle;
 	unsigned int depth;
 	unsigned int integrator;
+	unsigned int light_samples;
+	unsigned int light_stratify;
 };
 
 

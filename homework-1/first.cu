@@ -45,6 +45,7 @@ struct TraceData
 	float3 origin;
 	float3 normal;
 	int depth;
+	unsigned int seed;
 };
 
 
@@ -161,10 +162,12 @@ static __forceinline__ __device__ float3 traceReflection(
 	OptixTraversableHandle handle,
 	float3                 ray_origin,
 	float3                 ray_direction,
-	int					   depth)
+	int					   depth,
+	int					   seed)
 {
 	TraceData td;
 	td.depth = depth;
+	td.seed = seed;
 
 	unsigned int u0, u1;
 	packPointer(&td, u0, u1);
@@ -205,12 +208,14 @@ __global__ void __raygen__rg()
 	
 	const float2 subpixel_jitter = make_float2(0.5);
 
+	unsigned int seed = tea<4>(idx.y*params.image_width + idx.x, 0);
+
 	// Map our launch idx to a screen location and create a ray from the camera
 	// location through the screen
 	float3 ray_origin, ray_direction;
 	computeRay(idx, subpixel_jitter, dim, ray_origin, ray_direction);
 	
-	float3 result = traceReflection(params.handle, ray_origin, ray_direction, 0);
+	float3 result = traceReflection(params.handle, ray_origin, ray_direction, 0, seed);
 
 	// Record results in our output raster
 	params.image[idx.y * params.image_width + idx.x] = make_color_no_gamma(result);
@@ -226,10 +231,9 @@ extern "C" __global__ void __miss__ms()
 	td->color = miss_data->bg_color;
 }
 
-void shade(float3 N, HitGroupData* hit_data)
-{
-	const float  PI = 3.1415927f;
+const float  PI = 3.1415927f;
 
+float3 rayTracerShade(float3 N, HitGroupData* hit_data) {
 	const float3 orig = optixGetWorldRayOrigin();
 	const float3 dir = optixGetWorldRayDirection();
 	const float  t = optixGetRayTmax();
@@ -281,7 +285,7 @@ void shade(float3 N, HitGroupData* hit_data)
 			params.handle, occlusionOrig, occlusionDir,
 			0.0001f, LDist);
 
-		if (occluded) 
+		if (occluded)
 		{
 			V = 0;
 		}
@@ -289,8 +293,39 @@ void shade(float3 N, HitGroupData* hit_data)
 		c += V * intensity * light.color * (lambert + phong);
 	}
 
+	TraceData* td = getTraceData();
+
+
+	// specularity
+	float s = hit_data->specular.x + hit_data->specular.y + hit_data->specular.x;
+	if (s > 0 && td->depth < params.depth)
+	{
+		td->origin = P;
+
+		float3 r = normalize(orig - P);
+		float3 refl = N * 2.0f * dot(r, N) - r;
+		refl = normalize(refl);
+
+		float3 reflOrigin = P + N * EPSILON;
+
+		// trace reflection
+		float3 reflColor = traceReflection(params.handle, reflOrigin, refl, td->depth + 1, td->seed);
+		c += hit_data->specular * reflColor;
+	}
+
+	return c;
+}
+
+float3 analyticDirectShade(float3 N, HitGroupData* hit_data) {
+	const float3 orig = optixGetWorldRayOrigin();
+	const float3 dir = optixGetWorldRayDirection();
+	const float  t = optixGetRayTmax();
+	const float3 P = orig + t * dir; // hit point
 
 	DQuadLight* dql = (DQuadLight*)params.quadLights;
+	float3 c = make_float3(0);
+
+	c += hit_data->ambient + hit_data->emission;
 
 	for (int j = 0; j < params.quad_light_count; j++)
 	{
@@ -302,12 +337,14 @@ void shade(float3 N, HitGroupData* hit_data)
 		verticies[2] = ql.a + ql.ab + ql.ac;
 		verticies[3] = ql.a + ql.ac;
 
+
+
 		float3 irradiance = make_float3(0);
 
 		for (int i = 0; i < vertexCount; i++) {
 			float3 v1 = verticies[i];
 			float3 v2 = verticies[(i + 1) % vertexCount];
-			float theta = acosf( dot( normalize(v1 - P), normalize(v2 - P) ) );
+			float theta = acosf(dot(normalize(v1 - P), normalize(v2 - P)));
 			float3 gamma = normalize(cross(v1 - P, v2 - P));
 
 			irradiance += theta * gamma;
@@ -318,31 +355,93 @@ void shade(float3 N, HitGroupData* hit_data)
 		c += (hit_data->diffuse / PI) * ql.intensity * dot(irradiance, N);
 	}
 
-	TraceData* td = getTraceData();
+	return c;
+}
+
+float3 directShade(float3 N, HitGroupData* hit_data) {
+	const int light_samples = params.light_samples;
+	const int strat_grid = params.light_stratify ? sqrtf(light_samples) : 1;
 	
+	TraceData* td = getTraceData();
 
-	// specularity
-	float s = hit_data->specular.x + hit_data->specular.y + hit_data->specular.x;
-	if (s > 0 && td->depth < params.depth)
+	const float3 orig = optixGetWorldRayOrigin();
+	const float3 dir = optixGetWorldRayDirection();
+	const float  t = optixGetRayTmax();
+	const float3 P = orig + t * dir; // hit point
+
+	DQuadLight* dql = (DQuadLight*)params.quadLights;
+	float3 fc = make_float3(0);
+
+	fc += hit_data->ambient + hit_data->emission;
+
+
+	for (int j = 0; j < params.quad_light_count; j++) 
 	{
-		td->origin = P;
+		float3 col = make_float3(0);
+		DQuadLight ql = dql[j];
 
-		float3 r = normalize(orig - P);
-		float3 refl = N * 2.0f * dot(r, N) - r;
-		refl = normalize(refl);
-		
-		float3 reflOrigin = P + N * EPSILON;
+		float3 a = ql.a;							// verticies of quad light
+		float3 b = ql.a + ql.ab;
+		float3 c = ql.a + ql.ac;
+		float3 nl = cross(b - a, c - a);			// surface normal of the area light
 
-		// trace reflection
-		if (params.integrator == RAYTRACER)
-		{
-			float3 reflColor = traceReflection(params.handle, reflOrigin, refl, td->depth + 1);
-			c += hit_data->specular * reflColor;
+		// TODO: this only works when the light is on the xz plane
+		float A = abs(ql.ab.x - ql.ac.x) * abs(ql.ab.z - ql.ac.z); // area of parallelogram
+
+		for (int k = 0; k < light_samples; k++) {
+
+			float u1 = rnd(td->seed);
+			float u2 = rnd(td->seed);
+
+			int si = k / strat_grid;						// Stratified grid cell i
+			int sj = k % strat_grid;						// Stratified grid cell j
+
+			float3 x1 = ql.a								// sampled point in light source
+				+ (sj + u1)/strat_grid * ql.ab 
+				+ (si + u2)/strat_grid * ql.ac;		
+			float3 omegaI = normalize(x1 - P);				// direction vector from hit point to light sample
+			float R = length(P - x1);						// distance from hit poitn to light sample
+			float3 refl = normalize((2.0f * dot(-1 * omegaI, N) * N) + omegaI);	// reflection vector of sample
+			float dOmegaI = dot(nl, omegaI) / (R*R);		// 
+			
+			// Visibility of sample
+			float3 occDir = normalize(x1 - P);
+			const bool occluded = traceOcclusion(params.handle, P + occDir * EPSILON, occDir,
+				0.0001f, length(x1 - P));
+			float V = occluded ? 0 : 1;
+
+			float3 bsdf = hit_data->diffuse / PI;			// Lambert shading
+
+			float rDotWi = dot(refl, dir);					// Specular shading
+			if(length(hit_data->specular) > 0 && rDotWi > 0)
+				bsdf += hit_data->specular * ((hit_data->specular + 2.0f) / 2.0f*PI) * pow(rDotWi, hit_data->shininess);
+
+			// Calculate cosine component
+			float nDotWi = fmax(dot(N, omegaI), 0.0f);
+			col += bsdf * nDotWi * V * dOmegaI;		// Contribution from this sample
 		}
 
-	} 
-	
-	td->color = c;
+		//fc += col * ql.intensity * (A / light_samples);
+		fc += col * ql.intensity * (1.0f / light_samples);
+		
+	}
+
+	return fc;
+}
+
+void shade(float3 N, HitGroupData* hit_data)
+{
+	TraceData* td = getTraceData();
+
+	if (params.integrator == RAYTRACER) {
+		td->color = rayTracerShade(N, hit_data);
+	}
+	else if (params.integrator == ANALYTICDIRECT) {
+		td->color = analyticDirectShade(N, hit_data);
+	}
+	if (params.integrator == DIRECT) {
+		td->color = directShade(N, hit_data);
+	}
 }
 
 
@@ -468,6 +567,7 @@ extern "C" __global__ void __intersection__primative()
 	HitGroupData* hg_data = reinterpret_cast<HitGroupData*>(optixGetSbtDataPointer());
 	float3 orig = optixGetObjectRayOrigin();
 	float3 dir = optixGetObjectRayDirection();
+	unsigned int flags = optixGetRayFlags();
 
 	// apply inverse transform
 	orig = transform(orig, hg_data->inverseTransform);
@@ -484,6 +584,12 @@ extern "C" __global__ void __intersection__primative()
 		hit = intersect_sphere(hg_data, orig, dir, normal, t);
 	}
 	else if(hg_data->primativeType == TRIANGLE)
+	{
+		hit = intersect_triangle(hg_data, orig, dir, normal, t);
+	}
+	// Quad lights should not participate in occlusion checks.
+	// Assume that we are doing an occlusion trace based on flags
+	else if (hg_data->primativeType == QUADLIGHT && flags != OPTIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT)
 	{
 		hit = intersect_triangle(hg_data, orig, dir, normal, t);
 	}
