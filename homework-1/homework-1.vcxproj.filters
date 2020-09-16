@@ -95,6 +95,9 @@
     <Filter Include="HW1 Scenes">
       <UniqueIdentifier>{94a678b9-72b8-4157-b50e-233023b3af24}</UniqueIdentifier>
     </Filter>
+    <Filter Include="HW3 Scenes">
+      <UniqueIdentifier>{b7f0671f-6d6c-42b3-91fa-4c0c17b4ca7e}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\hw2-scenes\analytic.test">
@@ -144,6 +147,18 @@
     </None>
     <None Include="..\scenes\scene7.test">
       <Filter>HW1 Scenes</Filter>
+    </None>
+    <None Include="..\hw3-scenes\cornellNEE.test">
+      <Filter>HW3 Scenes</Filter>
+    </None>
+    <None Include="..\hw3-scenes\cornellRR.test">
+      <Filter>HW3 Scenes</Filter>
+    </None>
+    <None Include="..\hw3-scenes\cornellSimple.test">
+      <Filter>HW3 Scenes</Filter>
+    </None>
+    <None Include="..\hw3-scenes\dragon.test">
+      <Filter>HW3 Scenes</Filter>
     </None>
   </ItemGroup>
   <ItemGroup>

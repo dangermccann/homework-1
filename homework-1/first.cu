@@ -374,6 +374,7 @@ float3 directShade(float3 N, HitGroupData* hit_data) {
 
 	fc += hit_data->ambient + hit_data->emission;
 
+	float3 refl = normalize((2.0f * dot(-1 * dir, N) * N) + dir);	// reflection vector of sample
 
 	for (int j = 0; j < params.quad_light_count; j++) 
 	{
@@ -401,24 +402,22 @@ float3 directShade(float3 N, HitGroupData* hit_data) {
 				+ (si + u2)/strat_grid * ql.ac;		
 			float3 omegaI = normalize(x1 - P);				// direction vector from hit point to light sample
 			float R = length(P - x1);						// distance from hit poitn to light sample
-			float3 refl = normalize((2.0f * dot(-1 * omegaI, N) * N) + omegaI);	// reflection vector of sample
-			float dOmegaI = dot(nl, omegaI) / (R*R);		// 
+			float dOmegaI = fmax(dot(nl, omegaI), 0) / (R*R);		// differential omegaI
 			
 			// Visibility of sample
 			float3 occDir = normalize(x1 - P);
-			const bool occluded = traceOcclusion(params.handle, P + occDir * EPSILON, occDir,
+			const bool occluded = traceOcclusion(params.handle, P, occDir,
 				0.0001f, length(x1 - P));
 			float V = occluded ? 0 : 1;
 
 			float3 bsdf = hit_data->diffuse / PI;			// Lambert shading
 
-			float rDotWi = dot(refl, dir);					// Specular shading
+			float rDotWi = dot(refl, omegaI);				// Specular shading
 			if(length(hit_data->specular) > 0 && rDotWi > 0)
-				bsdf += hit_data->specular * ((hit_data->specular + 2.0f) / 2.0f*PI) * pow(rDotWi, hit_data->shininess);
+				bsdf += hit_data->specular * ((hit_data->shininess + 2.0f) / 2.0f*PI) * pow(rDotWi, hit_data->shininess);
 
-			// Calculate cosine component
-			float nDotWi = fmax(dot(N, omegaI), 0.0f);
-			col += bsdf * nDotWi * V * dOmegaI;		// Contribution from this sample
+			float nDotWi = fmax(dot(N, omegaI), 0.0f);		// Cosine component
+			col += bsdf * nDotWi * V * dOmegaI;				// Put it all together
 		}
 
 		//fc += col * ql.intensity * (A / light_samples);

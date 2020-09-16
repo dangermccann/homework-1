@@ -210,6 +210,10 @@
     <None Include="..\hw2-scenes\direct9.test" />
     <None Include="..\hw2-scenes\dragon.test" />
     <None Include="..\hw2-scenes\sphere.test" />
+    <None Include="..\hw3-scenes\cornellNEE.test" />
+    <None Include="..\hw3-scenes\cornellRR.test" />
+    <None Include="..\hw3-scenes\cornellSimple.test" />
+    <None Include="..\hw3-scenes\dragon.test" />
     <None Include="..\scenes\scene4-ambient.test" />
     <None Include="..\scenes\scene4-diffuse.test" />
     <None Include="..\scenes\scene4-emission.test" />
