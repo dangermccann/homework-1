@@ -13,6 +13,7 @@ Scene::Scene()
 	integrator = "raytracer";
 	lightSamples = 1;
 	lightStratify = 0;
+	spp = 1;
 }
 
 
@@ -68,6 +69,12 @@ int Scene::Parse(LPCWSTR path)
 				else if (cmd == "lightsamples") {
 					if (ReadVals(s, 1, values)) {
 						lightSamples = (int)values[0];
+					}
+					else { return ERR_INVALID_FILE; }
+				}
+				else if (cmd == "spp") {
+					if (ReadVals(s, 1, values)) {
+						spp = (int)values[0];
 					}
 					else { return ERR_INVALID_FILE; }
 				}

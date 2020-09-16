@@ -949,8 +949,12 @@ void OptiXTracer::Trace(const Scene & scene)
 	else if (scene.integrator == "direct") {
 		params.integrator = DIRECT;
 	}
+	else if (scene.integrator == "pathtracer") {
+		params.integrator = PATHTRACER;
+	}
 	params.light_samples = scene.lightSamples;
 	params.light_stratify = scene.lightStratify;
+	params.spp = scene.spp;
 
 	SetupCamera(scene);
 	SetupLights(scene);

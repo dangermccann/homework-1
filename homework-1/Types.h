@@ -22,6 +22,7 @@ enum IntegratorType
 	RAYTRACER,
 	ANALYTICDIRECT,
 	DIRECT,
+	PATHTRACER
 };
 
 struct Params
@@ -40,6 +41,7 @@ struct Params
 	unsigned int integrator;
 	unsigned int light_samples;
 	unsigned int light_stratify;
+	unsigned int spp;
 };
 
 
