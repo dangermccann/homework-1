@@ -158,12 +158,12 @@ static __forceinline__ __device__ bool traceOcclusion(
 
 
 
-static __forceinline__ __device__ float3 traceReflection(
+static __forceinline__ __device__ float3 traceRadiance(
 	OptixTraversableHandle handle,
 	float3                 ray_origin,
 	float3                 ray_direction,
 	int					   depth,
-	int					   seed)
+	unsigned int&		   seed)
 {
 	TraceData td;
 	td.depth = depth;
@@ -186,6 +186,7 @@ static __forceinline__ __device__ float3 traceReflection(
 		RAY_TYPE_RADIANCE,      // missSBTIndex
 		u0, u1);
 	
+	seed = td.seed;
 	return td.color;
 }
 
@@ -220,7 +221,7 @@ __global__ void __raygen__rg()
 	for (int p = 0; p < params.spp; p++)
 	{
 		computeRay(idx, subpixel_jitter, dim, ray_origin, ray_direction);
-		result += traceReflection(params.handle, ray_origin, ray_direction, 0, seed);
+		result += traceRadiance(params.handle, ray_origin, ray_direction, 0, seed);
 
 		// Subsequent rays go through random point in pixel
 		subpixel_jitter = make_float2(rnd(seed), rnd(seed));
@@ -322,7 +323,7 @@ float3 rayTracerShade(float3 N, HitGroupData* hit_data)
 		float3 reflOrigin = P + N * EPSILON;
 
 		// trace reflection
-		float3 reflColor = traceReflection(params.handle, reflOrigin, refl, td->depth + 1, td->seed);
+		float3 reflColor = traceRadiance(params.handle, reflOrigin, refl, td->depth + 1, td->seed);
 		c += hit_data->specular * reflColor;
 	}
 
@@ -403,12 +404,13 @@ float3 directShade(float3 N, HitGroupData* hit_data)
 
 		// TODO: this only works when the light is on the xz plane
 		//float A = abs(ql.ab.x - ql.ac.x) * abs(ql.ab.z - ql.ac.z); // area of parallelogram
-		float A = length(ql.ab) * length(ql.ac);
+		//float A = length(ql.ab) * length(ql.ac);
+		float A = length(cross(ql.ab, ql.ac));
 
 		for (int k = 0; k < light_samples; k++) {
 
-			float u1 = rnd(td->seed);
-			float u2 = rnd(td->seed);
+			float u1 = 0.8f; //  rnd(td->seed);
+			float u2 = 0.3f; // rnd(td->seed);
 
 			int si = k / strat_grid;						// Stratified grid cell i
 			int sj = k % strat_grid;						// Stratified grid cell j
@@ -417,22 +419,24 @@ float3 directShade(float3 N, HitGroupData* hit_data)
 				+ (sj + u1)/strat_grid * ql.ab 
 				+ (si + u2)/strat_grid * ql.ac;		
 			float3 omegaI = normalize(x1 - P);				// direction vector from hit point to light sample
-			float R = length(P - x1);						// distance from hit point to light sample
+			float R = length(x1 - P);						// distance from hit point to light sample
+			float nDotWi = fmax(dot(N, omegaI), 0.0f);		// Cosine component
 			float dOmegaI = fmax(dot(nl, omegaI), 0) / (R*R);		// differential omegaI
 			
 			// Visibility of sample
 			float3 occDir = normalize(x1 - P);
 			const bool occluded = traceOcclusion(params.handle, P, occDir,
-				0.0001f, length(x1 - P));
+				0.0001f, R);
 			float V = occluded ? 0 : 1;
 
 			float3 brdf = hit_data->diffuse / PI;			// Lambert shading
 
+			//float3 H = normalize(omegaI - dir);
+			//float nDH = dot(N, H);
 			float rDotWi = dot(refl, omegaI);				// Specular shading
 			if(length(hit_data->specular) > 0 && rDotWi > 0)
 				brdf += hit_data->specular * ((hit_data->shininess + 2.0f) / 2.0f*PI) * pow(rDotWi, hit_data->shininess);
 
-			float nDotWi = fmax(dot(N, omegaI), 0.0f);		// Cosine component
 			col += brdf * nDotWi * V * dOmegaI;				// Put it all together
 		}
 
@@ -446,7 +450,65 @@ float3 directShade(float3 N, HitGroupData* hit_data)
 
 float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 {
-	return make_float3(0);
+	TraceData* td = getTraceData();
+
+	// Exit on maximum recusion depth
+	if (td->depth > params.depth)
+	{
+		return hit_data->emission;
+	}
+
+	// Exit if we intersect the light source
+	if (hit_data->primativeType == QUADLIGHT)
+	{
+		return hit_data->emission;
+	}
+
+	const float3 orig = optixGetWorldRayOrigin();
+	const float3 dir = optixGetWorldRayDirection();
+	const float  t = optixGetRayTmax();
+	const float3 P = orig + t * dir; // hit point
+
+	// randomly generate hemisphere sample
+	float psi1 = rnd(td->seed);
+	float psi2 = rnd(td->seed);
+
+	float theta = acos(psi1);		// random number between pi/2 and 0
+	float phi = 2.0f * PI * psi2;	// random number between 0 and 2*pi
+
+	// calcualte sample in cartesian coordinates 
+	float3 s = make_float3(cos(phi) * sin(theta), sin(phi) * sin(theta), cos(theta));
+
+	// rotate sample to be centered about normal N
+	float3 a = make_float3(0, 1, 0);
+	if (dot(a, N) > 0.9)
+		a = make_float3(1, 0, 0);
+	float3 w = normalize(N);
+	float3 u = normalize(cross(a, w));
+	float3 v = cross(w, u);
+
+	// direction vector to next sample
+	float3 omegaI = normalize(s.x * u + s.y * v + s.z * w);
+
+	// Recursively sample next color along path
+	float3 nextColor = traceRadiance(params.handle, P + EPSILON * N, omegaI, td->depth + 1, td->seed);
+
+	// Lambert shading
+	float3 brdf = hit_data->diffuse / PI;			
+
+	// Specular shading
+	float3 refl = normalize((2.0f * dot(-1 * dir, N) * N) + dir);	// reflection vector of sample
+	float rDotWi = dot(refl, omegaI);				
+	if (length(hit_data->specular) > 0 && rDotWi > 0)
+		brdf += hit_data->specular * ((hit_data->shininess + 2.0f) / 2.0f*PI) * pow(rDotWi, hit_data->shininess);
+
+	float nDotWi = fmax(dot(N, omegaI), 0.0f);		// Cosine component
+
+
+	return 2.0f * PI * brdf * nextColor * nDotWi;
+	//return PI * brdf * nDotWi;
+	//printf("%f, %f, %f\n", omegaI.x, omegaI.y, omegaI.z);
+	//return nextColor;
 }
 
 
@@ -460,10 +522,10 @@ void shade(float3 N, HitGroupData* hit_data)
 	else if (params.integrator == ANALYTICDIRECT) {
 		td->color = analyticDirectShade(N, hit_data);
 	}
-	if (params.integrator == DIRECT) {
+	else if (params.integrator == DIRECT) {
 		td->color = directShade(N, hit_data);
 	}
-	if (params.integrator == PATHTRACER) {
+	else if (params.integrator == PATHTRACER) {
 		td->color = pathTraceShade(N, hit_data);
 	}
 }
@@ -477,7 +539,6 @@ extern "C" __global__ void __closesthit__primative()
 
 
 	HitGroupData* hit_data = reinterpret_cast<HitGroupData*>(optixGetSbtDataPointer());
-	const float3 dir = optixGetWorldRayDirection();
 
 	const float3 normal =
 		make_float3(
@@ -503,7 +564,7 @@ bool intersect_triangle(HitGroupData* hg_data, float3 orig, float3 dir, float3 &
 	float3 a = hg_data->verticies[0];
 	float3 b = hg_data->verticies[1];
 	float3 c = hg_data->verticies[2];
-	normal = cross(c - a, b - a);
+	normal = normalize(cross(c - a, b - a));
 
 	float dirDotN(dot(dir, normal));
 
