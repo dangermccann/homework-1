@@ -13,6 +13,8 @@ Scene::Scene()
 	integrator = "raytracer";
 	lightSamples = 1;
 	lightStratify = 0;
+	nextEventEstimation = 0;
+	russianRoulette = 0;
 	spp = 1;
 }
 
@@ -84,6 +86,20 @@ int Scene::Parse(LPCWSTR path)
 
 					if (onOff == "on")
 						lightStratify = 1;
+				}
+				else if (cmd == "nexteventestimation") {
+					std::string onOff;
+					s >> onOff;
+
+					if (onOff == "on")
+						nextEventEstimation = 1;
+				}
+				else if (cmd == "russianroulette") {
+					std::string onOff;
+					s >> onOff;
+
+					if (onOff == "on")
+						russianRoulette = 1;
 				}
 				else if (cmd == "output") {
 					s >> outputFileName;

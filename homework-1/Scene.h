@@ -81,7 +81,7 @@ class Scene
 {
 public:
 	int width, height, maxDepth, lightSamples, spp;
-	int lightStratify;
+	int lightStratify, nextEventEstimation, russianRoulette;
 	std::string outputFileName;
 	std::string integrator;
 	Scene();

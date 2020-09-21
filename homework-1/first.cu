@@ -34,6 +34,7 @@
 
 #include <sutil/vec_math.h>
 
+const float  PI = 3.1415927f;
 
 extern "C" {
 	__constant__ Params params;
@@ -44,6 +45,7 @@ struct TraceData
 	float3 color;
 	float3 origin;
 	float3 normal;
+	float3 throughput;
 	int depth;
 	unsigned int seed;
 };
@@ -163,11 +165,13 @@ static __forceinline__ __device__ float3 traceRadiance(
 	float3                 ray_origin,
 	float3                 ray_direction,
 	int					   depth,
-	unsigned int&		   seed)
+	unsigned int&		   seed,
+	float3&				   throughput)
 {
 	TraceData td;
 	td.depth = depth;
 	td.seed = seed;
+	td.throughput = throughput;
 
 	unsigned int u0, u1;
 	packPointer(&td, u0, u1);
@@ -187,6 +191,7 @@ static __forceinline__ __device__ float3 traceRadiance(
 		u0, u1);
 	
 	seed = td.seed;
+	throughput = td.throughput;
 	return td.color;
 }
 
@@ -215,13 +220,14 @@ __global__ void __raygen__rg()
 	// Map our launch idx to a screen location and create a ray from the camera
 	// location through the screen
 	float3 ray_origin, ray_direction;
+	float3 throughput = make_float3(1);
 
 	// Iterate over all samples-per-pixel
 	float3 result = make_float3(0);
 	for (int p = 0; p < params.spp; p++)
 	{
 		computeRay(idx, subpixel_jitter, dim, ray_origin, ray_direction);
-		result += traceRadiance(params.handle, ray_origin, ray_direction, 0, seed);
+		result += traceRadiance(params.handle, ray_origin, ray_direction, 0, seed, throughput);
 
 		// Subsequent rays go through random point in pixel
 		subpixel_jitter = make_float2(rnd(seed), rnd(seed));
@@ -243,8 +249,6 @@ extern "C" __global__ void __miss__ms()
 	TraceData* td = getTraceData();
 	td->color = miss_data->bg_color;
 }
-
-const float  PI = 3.1415927f;
 
 float3 rayTracerShade(float3 N, HitGroupData* hit_data) 
 {
@@ -323,7 +327,7 @@ float3 rayTracerShade(float3 N, HitGroupData* hit_data)
 		float3 reflOrigin = P + N * EPSILON;
 
 		// trace reflection
-		float3 reflColor = traceRadiance(params.handle, reflOrigin, refl, td->depth + 1, td->seed);
+		float3 reflColor = traceRadiance(params.handle, reflOrigin, refl, td->depth + 1, td->seed, td->throughput);
 		c += hit_data->specular * reflColor;
 	}
 
@@ -388,9 +392,10 @@ float3 directShade(float3 N, HitGroupData* hit_data)
 	DQuadLight* dql = (DQuadLight*)params.quadLights;
 	float3 fc = make_float3(0);
 
-	fc += hit_data->ambient + hit_data->emission;
+	if (params.nee == 0)
+		fc += hit_data->ambient + hit_data->emission;
 
-	float3 refl = normalize((2.0f * dot(-1 * dir, N) * N) + dir);	// reflection vector of sample
+	float3 refl = normalize((2.0f * dot(-dir, N) * N) + dir);	// reflection vector of sample
 
 	for (int j = 0; j < params.quad_light_count; j++) 
 	{
@@ -400,32 +405,37 @@ float3 directShade(float3 N, HitGroupData* hit_data)
 		float3 a = ql.a;							// verticies of quad light
 		float3 b = ql.a + ql.ab;
 		float3 c = ql.a + ql.ac;
-		float3 nl = cross(b - a, c - a);			// surface normal of the area light
+		float3 nl = cross(c - a, b - a);			// surface normal of the area light
 
-		// TODO: this only works when the light is on the xz plane
-		//float A = abs(ql.ab.x - ql.ac.x) * abs(ql.ab.z - ql.ac.z); // area of parallelogram
-		//float A = length(ql.ab) * length(ql.ac);
-		float A = length(cross(ql.ab, ql.ac));
+		float A = length(ql.ab) * length(ql.ac);	// area of parallelogram
+		//float A = length(cross(ql.ab, ql.ac));
 
 		for (int k = 0; k < light_samples; k++) {
 
-			float u1 = 0.8f; //  rnd(td->seed);
-			float u2 = 0.3f; // rnd(td->seed);
+			float u1 = rnd(td->seed);
+			float u2 = rnd(td->seed);
 
-			int si = k / strat_grid;						// Stratified grid cell i
-			int sj = k % strat_grid;						// Stratified grid cell j
-
+			int si, sj;
+			if (params.light_stratify)
+			{
+				si = k / strat_grid;						// Stratified grid cell i
+				sj = k % strat_grid;						// Stratified grid cell j
+			}
+			else {
+				si = sj = 0;
+			}
+			
 			float3 x1 = ql.a								// sampled point in light source
-				+ (sj + u1)/strat_grid * ql.ab 
-				+ (si + u2)/strat_grid * ql.ac;		
+				+ ((sj + u1)/strat_grid) * ql.ab
+				+ ((si + u2)/strat_grid) * ql.ac;		
+
 			float3 omegaI = normalize(x1 - P);				// direction vector from hit point to light sample
 			float R = length(x1 - P);						// distance from hit point to light sample
 			float nDotWi = fmax(dot(N, omegaI), 0.0f);		// Cosine component
-			float dOmegaI = fmax(dot(nl, omegaI), 0) / (R*R);		// differential omegaI
+			float LnDotWi = fmax(-dot(nl, omegaI), 0);		// differential omegaI
 			
 			// Visibility of sample
-			float3 occDir = normalize(x1 - P);
-			const bool occluded = traceOcclusion(params.handle, P, occDir,
+			const bool occluded = traceOcclusion(params.handle, P, omegaI,
 				0.0001f, R);
 			float V = occluded ? 0 : 1;
 
@@ -433,16 +443,19 @@ float3 directShade(float3 N, HitGroupData* hit_data)
 
 			//float3 H = normalize(omegaI - dir);
 			//float nDH = dot(N, H);
-			float rDotWi = dot(refl, omegaI);				// Specular shading
+
+			float rDotWi = fmax(0, dot(refl, omegaI));				// Specular shading
 			if(length(hit_data->specular) > 0 && rDotWi > 0)
 				brdf += hit_data->specular * ((hit_data->shininess + 2.0f) / 2.0f*PI) * pow(rDotWi, hit_data->shininess);
 
-			col += brdf * nDotWi * V * dOmegaI;				// Put it all together
+			//brdf = clamp(brdf, 0.0f, 1.0f);
+			//printf("%f, %f, %f \n", brdf.x, brdf.y, brdf.z);
+
+			col += V * brdf * nDotWi * LnDotWi / (R * R);	// Put it all together
 		}
 
-		//fc += col * ql.intensity * (A / light_samples);
-		fc += col * ql.intensity * (1.0f / light_samples);
-		
+		//fc += (col * ql.intensity * A) / light_samples;
+		fc += col * ql.intensity * (1.0f / light_samples);	
 	}
 
 	return fc;
@@ -453,15 +466,46 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 	TraceData* td = getTraceData();
 
 	// Exit on maximum recusion depth
-	if (td->depth > params.depth)
+	int max_depth = params.depth;
+	if (params.nee == 1)
+		max_depth--;
+
+	if (td->depth > max_depth)
 	{
-		return hit_data->emission;
+		if (params.nee == 1)
+			return make_float3(0);
+		else
+			return hit_data->emission;
 	}
 
 	// Exit if we intersect the light source
 	if (hit_data->primativeType == QUADLIGHT)
 	{
-		return hit_data->emission;
+		if (params.nee == 1)
+			return make_float3(0);
+		else
+			return hit_data->emission;
+	}
+
+	// 
+	// If using Russian Roulette terminate based on probability q
+	//
+	float q = 1;						// termination probability 
+	float rrBoost = 1.0f;
+	if (params.russian_roulette == 1)
+	{
+		// choose paths with lower throughput to terminate more frequently 
+		q = 1.0f - fmin(fmax(fmax(td->throughput.x, td->throughput.y), td->throughput.z), 1.0f);
+		float p = rnd(td->seed);
+		if (p < q)
+		{
+			return make_float3(0);		// terminate
+		}
+		else
+		{
+			if(q < 1.0f)
+				rrBoost = 1.0f / (1.0f - q);	// boost paths that are not terminated 
+		}
 	}
 
 	const float3 orig = optixGetWorldRayOrigin();
@@ -473,8 +517,8 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 	float psi1 = rnd(td->seed);
 	float psi2 = rnd(td->seed);
 
-	float theta = acos(psi1);		// random number between pi/2 and 0
-	float phi = 2.0f * PI * psi2;	// random number between 0 and 2*pi
+	float theta = acos(clamp(psi1, 0.0f, 1.0f));		// random number between pi/2 and 0
+	float phi = 2.0f * PI * psi2;						// random number between 0 and 2*pi
 
 	// calcualte sample in cartesian coordinates 
 	float3 s = make_float3(cos(phi) * sin(theta), sin(phi) * sin(theta), cos(theta));
@@ -490,25 +534,29 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 	// direction vector to next sample
 	float3 omegaI = normalize(s.x * u + s.y * v + s.z * w);
 
-	// Recursively sample next color along path
-	float3 nextColor = traceRadiance(params.handle, P + EPSILON * N, omegaI, td->depth + 1, td->seed);
 
 	// Lambert shading
-	float3 brdf = hit_data->diffuse / PI;			
+	float3 brdf = hit_data->diffuse / PI;
 
 	// Specular shading
 	float3 refl = normalize((2.0f * dot(-1 * dir, N) * N) + dir);	// reflection vector of sample
-	float rDotWi = dot(refl, omegaI);				
+	float rDotWi = dot(refl, omegaI);
 	if (length(hit_data->specular) > 0 && rDotWi > 0)
 		brdf += hit_data->specular * ((hit_data->shininess + 2.0f) / 2.0f*PI) * pow(rDotWi, hit_data->shininess);
 
 	float nDotWi = fmax(dot(N, omegaI), 0.0f);		// Cosine component
 
+	// Apply throughput for next hop in path
+	td->throughput *= 2.0f * PI * brdf * nDotWi;
 
-	return 2.0f * PI * brdf * nextColor * nDotWi;
-	//return PI * brdf * nDotWi;
-	//printf("%f, %f, %f\n", omegaI.x, omegaI.y, omegaI.z);
-	//return nextColor;
+	// Recursively sample next color along path
+	float3 nextColor = traceRadiance(params.handle, P + EPSILON * N, omegaI, td->depth + 1, td->seed, td->throughput);
+	//nextColor = clamp(nextColor, 0.0f, 1.0f);
+
+	float3 Lo = 2.0f * PI * brdf * nextColor * nDotWi * rrBoost;
+	
+	//return clamp(Lo, 0, 6);
+	return Lo;
 }
 
 
@@ -526,7 +574,20 @@ void shade(float3 N, HitGroupData* hit_data)
 		td->color = directShade(N, hit_data);
 	}
 	else if (params.integrator == PATHTRACER) {
-		td->color = pathTraceShade(N, hit_data);
+		if (params.nee == 1) {
+			td->color = make_float3(0);
+
+			if(td->depth == 0)
+				td->color += hit_data->ambient + hit_data->emission;
+
+			td->color += directShade(N, hit_data);
+			td->color += pathTraceShade(N, hit_data);
+		}
+		else
+		{
+			// NEE off, do indirect lighting only 
+			td->color = pathTraceShade(N, hit_data);
+		}
 	}
 }
 

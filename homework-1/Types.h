@@ -41,7 +41,9 @@ struct Params
 	unsigned int integrator;
 	unsigned int light_samples;
 	unsigned int light_stratify;
+	unsigned int nee;
 	unsigned int spp;
+	unsigned int russian_roulette;
 };
 
 

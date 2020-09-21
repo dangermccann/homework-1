@@ -305,7 +305,7 @@ void OptiXTracer::InitProgram() {
 	//
 	// Link pipeline
 	//
-	const uint32_t    max_trace_depth = 10;
+	const uint32_t    max_trace_depth = 20;
 	OptixProgramGroup program_groups[] = { 
 		raygen_prog_group, miss_prog_group, 
 		hitgroup_prog_primative, 
@@ -954,7 +954,9 @@ void OptiXTracer::Trace(const Scene & scene)
 	}
 	params.light_samples = scene.lightSamples;
 	params.light_stratify = scene.lightStratify;
+	params.nee = scene.nextEventEstimation;
 	params.spp = scene.spp;
+	params.russian_roulette = scene.russianRoulette;
 
 	SetupCamera(scene);
 	SetupLights(scene);
