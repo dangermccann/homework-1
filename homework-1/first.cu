@@ -377,6 +377,20 @@ float3 analyticDirectShade(float3 N, HitGroupData* hit_data)
 	return c;
 }
 
+float3 brdf(float3 omegaI, float3 dir, float3 N, float3 kd, float3 ks, float s) 
+{
+	// reflection vector of sample
+	float3 refl = normalize((2.0f * dot(-dir, N) * N) + dir);	
+
+	float3 result = kd / PI;						// Lambert shading
+
+	float rDotWi = fmax(0, dot(refl, omegaI));		// Specular shading
+	if (length(ks) > 0 && rDotWi > 0)
+		result += ks * ((s + 2.0f) / (2.0f*PI)) * pow(rDotWi, s);
+
+	return result;
+}
+
 float3 directShade(float3 N, HitGroupData* hit_data) 
 {
 	const int light_samples = params.light_samples;
@@ -395,8 +409,6 @@ float3 directShade(float3 N, HitGroupData* hit_data)
 	if (params.nee == 0)
 		fc += hit_data->ambient + hit_data->emission;
 
-	float3 refl = normalize((2.0f * dot(-dir, N) * N) + dir);	// reflection vector of sample
-
 	for (int j = 0; j < params.quad_light_count; j++) 
 	{
 		float3 col = make_float3(0);
@@ -405,7 +417,7 @@ float3 directShade(float3 N, HitGroupData* hit_data)
 		float3 a = ql.a;							// verticies of quad light
 		float3 b = ql.a + ql.ab;
 		float3 c = ql.a + ql.ac;
-		float3 nl = cross(c - a, b - a);			// surface normal of the area light
+		float3 nl = normalize(cross(c - a, b - a));	// surface normal of the area light
 
 		float A = length(ql.ab) * length(ql.ac);	// area of parallelogram
 		//float A = length(cross(ql.ab, ql.ac));
@@ -439,23 +451,13 @@ float3 directShade(float3 N, HitGroupData* hit_data)
 				0.0001f, R);
 			float V = occluded ? 0 : 1;
 
-			float3 brdf = hit_data->diffuse / PI;			// Lambert shading
+			// BRDF
+			float3 f = brdf(omegaI, dir, N, hit_data->diffuse, hit_data->specular, hit_data->shininess);
 
-			//float3 H = normalize(omegaI - dir);
-			//float nDH = dot(N, H);
-
-			float rDotWi = fmax(0, dot(refl, omegaI));				// Specular shading
-			if(length(hit_data->specular) > 0 && rDotWi > 0)
-				brdf += hit_data->specular * ((hit_data->shininess + 2.0f) / 2.0f*PI) * pow(rDotWi, hit_data->shininess);
-
-			//brdf = clamp(brdf, 0.0f, 1.0f);
-			//printf("%f, %f, %f \n", brdf.x, brdf.y, brdf.z);
-
-			col += V * brdf * nDotWi * LnDotWi / (R * R);	// Put it all together
+			col += V * f * nDotWi * LnDotWi / (R * R);	// Put it all together
 		}
 
-		//fc += (col * ql.intensity * A) / light_samples;
-		fc += col * ql.intensity * (1.0f / light_samples);	
+		fc += (col * ql.intensity * A) / light_samples;
 	}
 
 	return fc;
@@ -470,7 +472,7 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 	if (params.nee == 1)
 		max_depth--;
 
-	if (td->depth > max_depth)
+	if (td->depth >= max_depth)
 	{
 		if (params.nee == 1)
 			return make_float3(0);
@@ -534,26 +536,19 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 	// direction vector to next sample
 	float3 omegaI = normalize(s.x * u + s.y * v + s.z * w);
 
-
-	// Lambert shading
-	float3 brdf = hit_data->diffuse / PI;
-
-	// Specular shading
-	float3 refl = normalize((2.0f * dot(-1 * dir, N) * N) + dir);	// reflection vector of sample
-	float rDotWi = dot(refl, omegaI);
-	if (length(hit_data->specular) > 0 && rDotWi > 0)
-		brdf += hit_data->specular * ((hit_data->shininess + 2.0f) / 2.0f*PI) * pow(rDotWi, hit_data->shininess);
+	// BRDF
+	float3 f = brdf(omegaI, dir, N, hit_data->diffuse, hit_data->specular, hit_data->shininess);
 
 	float nDotWi = fmax(dot(N, omegaI), 0.0f);		// Cosine component
 
 	// Apply throughput for next hop in path
-	td->throughput *= 2.0f * PI * brdf * nDotWi;
+	td->throughput *= 2.0f * PI * f * nDotWi;
 
 	// Recursively sample next color along path
 	float3 nextColor = traceRadiance(params.handle, P + EPSILON * N, omegaI, td->depth + 1, td->seed, td->throughput);
 	//nextColor = clamp(nextColor, 0.0f, 1.0f);
 
-	float3 Lo = 2.0f * PI * brdf * nextColor * nDotWi * rrBoost;
+	float3 Lo = 2.0f * PI * f * nextColor * nDotWi * rrBoost;
 	
 	//return clamp(Lo, 0, 6);
 	return Lo;
