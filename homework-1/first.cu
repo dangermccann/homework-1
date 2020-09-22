@@ -114,6 +114,12 @@ static __forceinline__ __device__ float3 transform(float3 ray, float(&t)[16])
 }
 
 
+static __forceinline__ __device__ float dot0(float3 f1, float3 f2)
+{
+	return fmax(dot(f1, f2), 0.0f);
+}
+
+
 static __forceinline__ __device__ void transpose(float (& t)[16])
 {
 	float t1[16];
@@ -213,7 +219,7 @@ __global__ void __raygen__rg()
 	const uint3 dim = optixGetLaunchDimensions();
 	
 	// First ray goes through the center of the pixel
-	float2 subpixel_jitter = make_float2(0.5);
+	float2 subpixel_jitter = make_float2(0.5f);
 
 	unsigned int seed = tea<4>(idx.y*params.image_width + idx.x, 0);
 
@@ -380,11 +386,11 @@ float3 analyticDirectShade(float3 N, HitGroupData* hit_data)
 float3 brdf(float3 omegaI, float3 dir, float3 N, float3 kd, float3 ks, float s) 
 {
 	// reflection vector of sample
-	float3 refl = normalize((2.0f * dot(-dir, N) * N) + dir);	
+	float3 refl = normalize((2.0f * dot0(-dir, N) * N) + dir);
 
 	float3 result = kd / PI;						// Lambert shading
 
-	float rDotWi = fmax(0, dot(refl, omegaI));		// Specular shading
+	float rDotWi = fmax(0, dot0(refl, omegaI));		// Specular shading
 	if (length(ks) > 0 && rDotWi > 0)
 		result += ks * ((s + 2.0f) / (2.0f*PI)) * pow(rDotWi, s);
 
@@ -443,8 +449,8 @@ float3 directShade(float3 N, HitGroupData* hit_data)
 
 			float3 omegaI = normalize(x1 - P);				// direction vector from hit point to light sample
 			float R = length(x1 - P);						// distance from hit point to light sample
-			float nDotWi = fmax(dot(N, omegaI), 0.0f);		// Cosine component
-			float LnDotWi = fmax(-dot(nl, omegaI), 0);		// differential omegaI
+			float nDotWi = dot0(N, omegaI);					// Cosine component
+			float LnDotWi = dot0(-nl, omegaI);				// differential omegaI
 			
 			// Visibility of sample
 			const bool occluded = traceOcclusion(params.handle, P, omegaI,
@@ -539,7 +545,7 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 	// BRDF
 	float3 f = brdf(omegaI, dir, N, hit_data->diffuse, hit_data->specular, hit_data->shininess);
 
-	float nDotWi = fmax(dot(N, omegaI), 0.0f);		// Cosine component
+	float nDotWi = dot0(N, omegaI);				// Cosine component
 
 	// Apply throughput for next hop in path
 	td->throughput *= 2.0f * PI * f * nDotWi;
