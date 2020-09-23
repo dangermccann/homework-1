@@ -226,12 +226,13 @@ __global__ void __raygen__rg()
 	// Map our launch idx to a screen location and create a ray from the camera
 	// location through the screen
 	float3 ray_origin, ray_direction;
-	float3 throughput = make_float3(1);
 
 	// Iterate over all samples-per-pixel
 	float3 result = make_float3(0);
 	for (int p = 0; p < params.spp; p++)
 	{
+		float3 throughput = make_float3(1.0f);
+
 		computeRay(idx, subpixel_jitter, dim, ray_origin, ray_direction);
 		result += traceRadiance(params.handle, ray_origin, ray_direction, 0, seed, throughput);
 
@@ -390,7 +391,7 @@ float3 brdf(float3 omegaI, float3 dir, float3 N, float3 kd, float3 ks, float s)
 
 	float3 result = kd / PI;						// Lambert shading
 
-	float rDotWi = fmax(0, dot0(refl, omegaI));		// Specular shading
+	float rDotWi = dot0(refl, omegaI);				// Specular shading
 	if (length(ks) > 0 && rDotWi > 0)
 		result += ks * ((s + 2.0f) / (2.0f*PI)) * pow(rDotWi, s);
 
@@ -400,6 +401,8 @@ float3 brdf(float3 omegaI, float3 dir, float3 N, float3 kd, float3 ks, float s)
 float3 directShade(float3 N, HitGroupData* hit_data) 
 {
 	const int light_samples = params.light_samples;
+	
+	// Width and height of stratified grid
 	const int strat_grid = params.light_stratify ? sqrtf(light_samples) : 1;
 	
 	TraceData* td = getTraceData();
@@ -407,25 +410,25 @@ float3 directShade(float3 N, HitGroupData* hit_data)
 	const float3 orig = optixGetWorldRayOrigin();
 	const float3 dir = optixGetWorldRayDirection();
 	const float  t = optixGetRayTmax();
-	const float3 P = orig + t * dir; // hit point
+	const float3 P = orig + t * dir;					// hit point
 
 	DQuadLight* dql = (DQuadLight*)params.quadLights;
-	float3 fc = make_float3(0);
+	float3 fc = make_float3(0);							// final color
 
 	if (params.nee == 0)
-		fc += hit_data->ambient + hit_data->emission;
+		fc += hit_data->emission;
 
 	for (int j = 0; j < params.quad_light_count; j++) 
 	{
 		float3 col = make_float3(0);
 		DQuadLight ql = dql[j];
 
-		float3 a = ql.a;							// verticies of quad light
+		float3 a = ql.a;								// verticies of quad light
 		float3 b = ql.a + ql.ab;
 		float3 c = ql.a + ql.ac;
-		float3 nl = normalize(cross(c - a, b - a));	// surface normal of the area light
+		float3 nl = normalize(cross(c - a, b - a));		// surface normal of the area light
 
-		float A = length(ql.ab) * length(ql.ac);	// area of parallelogram
+		float A = length(ql.ab) * length(ql.ac);		// area of parallelogram
 		//float A = length(cross(ql.ab, ql.ac));
 
 		for (int k = 0; k < light_samples; k++) {
@@ -436,25 +439,25 @@ float3 directShade(float3 N, HitGroupData* hit_data)
 			int si, sj;
 			if (params.light_stratify)
 			{
-				si = k / strat_grid;						// Stratified grid cell i
-				sj = k % strat_grid;						// Stratified grid cell j
+				si = k / strat_grid;					// Stratified grid cell i
+				sj = k % strat_grid;					// Stratified grid cell j
 			}
 			else {
 				si = sj = 0;
 			}
 			
-			float3 x1 = ql.a								// sampled point in light source
+			float3 x1 = ql.a							// sampled point in light source
 				+ ((sj + u1)/strat_grid) * ql.ab
 				+ ((si + u2)/strat_grid) * ql.ac;		
 
-			float3 omegaI = normalize(x1 - P);				// direction vector from hit point to light sample
-			float R = length(x1 - P);						// distance from hit point to light sample
-			float nDotWi = dot0(N, omegaI);					// Cosine component
-			float LnDotWi = dot0(-nl, omegaI);				// differential omegaI
+			float3 omegaI = normalize(x1 - P);			// direction vector from hit point to light sample
+			float R = length(x1 - P);					// distance from hit point to light sample
+			float nDotWi = dot0(N, omegaI);				// Cosine component
+			float LnDotWi = dot0(-nl, omegaI);			// differential omegaI
 			
 			// Visibility of sample
-			const bool occluded = traceOcclusion(params.handle, P, omegaI,
-				0.0001f, R);
+			const bool occluded = traceOcclusion(params.handle, 
+				P, omegaI, EPSILON, R);
 			float V = occluded ? 0 : 1;
 
 			// BRDF
@@ -463,7 +466,7 @@ float3 directShade(float3 N, HitGroupData* hit_data)
 			col += V * f * nDotWi * LnDotWi / (R * R);	// Put it all together
 		}
 
-		fc += (col * ql.intensity * A) / light_samples;
+		fc += (col * ql.intensity * A) / light_samples;	// Accumulate final color
 	}
 
 	return fc;
@@ -493,27 +496,6 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 			return make_float3(0);
 		else
 			return hit_data->emission;
-	}
-
-	// 
-	// If using Russian Roulette terminate based on probability q
-	//
-	float q = 1;						// termination probability 
-	float rrBoost = 1.0f;
-	if (params.russian_roulette == 1)
-	{
-		// choose paths with lower throughput to terminate more frequently 
-		q = 1.0f - fmin(fmax(fmax(td->throughput.x, td->throughput.y), td->throughput.z), 1.0f);
-		float p = rnd(td->seed);
-		if (p < q)
-		{
-			return make_float3(0);		// terminate
-		}
-		else
-		{
-			if(q < 1.0f)
-				rrBoost = 1.0f / (1.0f - q);	// boost paths that are not terminated 
-		}
 	}
 
 	const float3 orig = optixGetWorldRayOrigin();
@@ -547,16 +529,67 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 
 	float nDotWi = dot0(N, omegaI);				// Cosine component
 
+
+
+
+	
+	float3 pt = td->throughput;
+
+	// 
+	// If using Russian Roulette terminate based on probability q
+	//
+	float q = 1;						// termination probability 
+	float rrBoost = 1.0f;
+	int rrTerminate = 0;
+
 	// Apply throughput for next hop in path
-	td->throughput *= 2.0f * PI * f * nDotWi;
+	td->throughput *= (2.0f * PI * f * nDotWi);
+
+	if (params.russian_roulette == 1)
+	{
+		// choose paths with lower throughput to terminate more frequently 
+		q = 1.0f - fmin(fmax(fmax(td->throughput.x, td->throughput.y), td->throughput.z), 1.0f);
+		//q = 0.5f;
+		float p = rnd(td->seed);
+		if (p < q || q >= 1.0f)
+		{
+			rrTerminate = 1;		// terminate
+		}
+		else
+		{
+			rrBoost = 1.0f / (1.0f - q);	// boost paths that are not terminated 
+		}
+	}
+
+	td->throughput *= rrBoost;
+	
+	if (0)
+	{
+		uint3 li = optixGetLaunchIndex();
+		if (li.x % 50 == 0 && li.y % 50 == 0)
+		{
+			float3 ct = td->throughput;
+
+			printf("(%03d, %03d) x %d : [%f, %f, %f] %d [%f, %f, %f]\n",
+				li.x, li.y, td->depth, pt.x, pt.y, pt.z, rrTerminate,
+				ct.x, ct.y, ct.z);
+		}
+	}
+
+
+	if (rrTerminate)
+	{
+		return make_float3(0);
+	}
+
+
 
 	// Recursively sample next color along path
 	float3 nextColor = traceRadiance(params.handle, P + EPSILON * N, omegaI, td->depth + 1, td->seed, td->throughput);
-	//nextColor = clamp(nextColor, 0.0f, 1.0f);
 
-	float3 Lo = 2.0f * PI * f * nextColor * nDotWi * rrBoost;
-	
-	//return clamp(Lo, 0, 6);
+	// final illumination function 
+	float3 Lo = 2.0f * PI * f * nextColor * nDotWi;
+
 	return Lo;
 }
 

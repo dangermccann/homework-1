@@ -305,7 +305,7 @@ void OptiXTracer::InitProgram() {
 	//
 	// Link pipeline
 	//
-	const uint32_t    max_trace_depth = 20;
+	const uint32_t    max_trace_depth = 31;
 	OptixProgramGroup program_groups[] = { 
 		raygen_prog_group, miss_prog_group, 
 		hitgroup_prog_primative, 
@@ -938,7 +938,7 @@ void OptiXTracer::Trace(const Scene & scene)
 	height = scene.height;
 	params.image_width = scene.width;
 	params.image_height = scene.height;
-	params.depth = scene.maxDepth;
+	params.depth = scene.maxDepth < 0 ? 31 : scene.maxDepth;
 
 	if (scene.integrator == "raytracer") {
 		params.integrator = RAYTRACER;
