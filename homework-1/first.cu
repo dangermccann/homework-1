@@ -515,7 +515,7 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 	// randomly generate hemisphere sample
 	float psi1 = rnd(td->seed);
 	float psi2 = rnd(td->seed);
-	float t = avgf3(hit_data->specular) / avgf3(hit_data->diffuse) + avgf3(hit_data->specular);
+	float t = avgf3(hit_data->specular) / (avgf3(hit_data->diffuse) + avgf3(hit_data->specular));
 	int specularSelect = 0;
 
 	if (params.importance_sampling == COSINE) 
@@ -542,6 +542,7 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 
 	// calcualte sample in cartesian coordinates 
 	float3 s = make_float3(cos(phi) * sin(theta), sin(phi) * sin(theta), cos(theta));
+	//s = clamp(s, 0.0f, 1.0f);
 
 	// rotate sample to be centered about normal N or reflection vector
 	float3 sRot = N;
@@ -587,7 +588,13 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 	}
 	else if (params.importance_sampling == BRDF)
 	{
-		td->throughput *= (2.0f * PI * f * nDotWi);
+		float3 refl = normalize(reflect(N, -dir));
+		float rDotWi = dot0(refl, omegaI);
+		float pdf = ((1.0f - t) * nDotWi / PI) +
+			(t * (hit_data->shininess + 1) / (2.0f * PI) * pow(rDotWi, hit_data->shininess));
+
+		//td->throughput *= f / pdf;
+		td->throughput *= (PI * f);
 	}
 
 
@@ -650,7 +657,8 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 		float pdf = ((1.0f - t) * nDotWi / PI) + 
 			(t * (hit_data->shininess + 1) / (2.0f * PI) * pow(rDotWi, hit_data->shininess));
 
-		Lo = nextColor * f / pdf;
+		//Lo = nextColor * f / pdf;
+		Lo = PI * f * nextColor * rrBoost;
 	}
 
 	return Lo;
