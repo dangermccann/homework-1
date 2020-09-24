@@ -25,6 +25,13 @@ enum IntegratorType
 	PATHTRACER
 };
 
+enum ImportanceSampling
+{
+	HEMISPHERE = 0,
+	COSINE = 1,
+	BRDF = 2
+};
+
 struct Params
 {
 	uchar4* image;
@@ -33,9 +40,9 @@ struct Params
 	unsigned int light_count;
 	unsigned int quad_light_count;
 	unsigned int image_width;
-	unsigned int           image_height;
-	float3                 cam_eye;
-	float3                 cam_u, cam_v, cam_w;
+	unsigned int image_height;
+	float3 cam_eye;
+	float3 cam_u, cam_v, cam_w;
 	OptixTraversableHandle handle;
 	unsigned int depth;
 	unsigned int integrator;
@@ -44,6 +51,7 @@ struct Params
 	unsigned int nee;
 	unsigned int spp;
 	unsigned int russian_roulette;
+	unsigned int importance_sampling;
 };
 
 

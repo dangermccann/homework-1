@@ -210,6 +210,11 @@ static __forceinline__ __device__ uchar4 make_color_no_gamma(float3 c)
 }
 
 
+float avgf3(float3 f3)
+{
+	return (f3.x + f3.y + f3.z) / 3.0f;
+}
+
 
 extern "C"
 __global__ void __raygen__rg()
@@ -221,7 +226,7 @@ __global__ void __raygen__rg()
 	// First ray goes through the center of the pixel
 	float2 subpixel_jitter = make_float2(0.5f);
 
-	unsigned int seed = tea<4>(idx.y*params.image_width + idx.x, 0);
+	unsigned int seed = tea<8>(idx.y*params.image_width + idx.x, idx.x ^ idx.y);
 
 	// Map our launch idx to a screen location and create a ray from the camera
 	// location through the screen
@@ -384,10 +389,15 @@ float3 analyticDirectShade(float3 N, HitGroupData* hit_data)
 	return c;
 }
 
+float3 reflect2(float3 N, float3 dir)
+{
+	return (2.0f * dot0(dir, N) * N) - dir;
+}
+
 float3 brdf(float3 omegaI, float3 dir, float3 N, float3 kd, float3 ks, float s) 
 {
 	// reflection vector of sample
-	float3 refl = normalize((2.0f * dot0(-dir, N) * N) + dir);
+	float3 refl = normalize(reflect2(N, -dir));
 
 	float3 result = kd / PI;						// Lambert shading
 
@@ -500,12 +510,32 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 
 	const float3 orig = optixGetWorldRayOrigin();
 	const float3 dir = optixGetWorldRayDirection();
-	const float  t = optixGetRayTmax();
-	const float3 P = orig + t * dir; // hit point
+	const float3 P = orig + optixGetRayTmax() * dir; // hit point
 
 	// randomly generate hemisphere sample
 	float psi1 = rnd(td->seed);
 	float psi2 = rnd(td->seed);
+	float t = avgf3(hit_data->specular) / avgf3(hit_data->diffuse) + avgf3(hit_data->specular);
+	int specularSelect = 0;
+
+	if (params.importance_sampling == COSINE) 
+	{
+		psi1 = sqrt(psi1);
+	}
+	else if (params.importance_sampling == BRDF)
+	{
+		float psi0 = rnd(td->seed);
+		if (psi1 <= t) 
+		{
+			psi1 = pow(psi1, (1.0f / (hit_data->shininess + 1)));
+			specularSelect = 1;
+		}
+		else
+		{
+			psi1 = sqrt(psi1);
+		}
+	}
+
 
 	float theta = acos(clamp(psi1, 0.0f, 1.0f));		// random number between pi/2 and 0
 	float phi = 2.0f * PI * psi2;						// random number between 0 and 2*pi
@@ -513,11 +543,15 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 	// calcualte sample in cartesian coordinates 
 	float3 s = make_float3(cos(phi) * sin(theta), sin(phi) * sin(theta), cos(theta));
 
-	// rotate sample to be centered about normal N
+	// rotate sample to be centered about normal N or reflection vector
+	float3 sRot = N;
+	if (params.importance_sampling == BRDF && specularSelect == 1)
+		sRot = reflect2(N, -dir);
+
 	float3 a = make_float3(0, 1, 0);
-	if (dot(a, N) > 0.9)
+	if (dot(a, sRot) > 0.9)
 		a = make_float3(1, 0, 0);
-	float3 w = normalize(N);
+	float3 w = normalize(sRot);
 	float3 u = normalize(cross(a, w));
 	float3 v = cross(w, u);
 
@@ -543,7 +577,19 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 	int rrTerminate = 0;
 
 	// Apply throughput for next hop in path
-	td->throughput *= (2.0f * PI * f * nDotWi);
+	if (params.importance_sampling == HEMISPHERE)
+	{
+		td->throughput *= (2.0f * PI * f * nDotWi);
+	}
+	else if (params.importance_sampling == COSINE)
+	{
+		td->throughput *= (PI * f);
+	}
+	else if (params.importance_sampling == BRDF)
+	{
+		td->throughput *= (2.0f * PI * f * nDotWi);
+	}
+
 
 	if (params.russian_roulette == 1)
 	{
@@ -588,7 +634,24 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 	float3 nextColor = traceRadiance(params.handle, P + EPSILON * N, omegaI, td->depth + 1, td->seed, td->throughput);
 
 	// final illumination function 
-	float3 Lo = 2.0f * PI * f * nextColor * nDotWi;
+	float3 Lo;
+	if (params.importance_sampling == HEMISPHERE)
+	{
+		Lo = 2.0f * PI * f * nextColor * nDotWi * rrBoost;
+	}
+	else if (params.importance_sampling == COSINE)
+	{
+		Lo = PI * f * nextColor * rrBoost;
+	}
+	else if (params.importance_sampling == BRDF)
+	{
+		float3 refl = normalize(reflect(N, -dir));
+		float rDotWi = dot0(refl, omegaI);
+		float pdf = ((1.0f - t) * nDotWi / PI) + 
+			(t * (hit_data->shininess + 1) / (2.0f * PI) * pow(rDotWi, hit_data->shininess));
+
+		Lo = nextColor * f / pdf;
+	}
 
 	return Lo;
 }

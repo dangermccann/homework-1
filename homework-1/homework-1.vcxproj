@@ -214,6 +214,12 @@
     <None Include="..\hw3-scenes\cornellRR.test" />
     <None Include="..\hw3-scenes\cornellSimple.test" />
     <None Include="..\hw3-scenes\dragon.test" />
+    <None Include="..\hw4-scenes\cornellBRDF.test" />
+    <None Include="..\hw4-scenes\cornellCosine.test" />
+    <None Include="..\hw4-scenes\cornellMIS.test" />
+    <None Include="..\hw4-scenes\dragon.test" />
+    <None Include="..\hw4-scenes\ggx.test" />
+    <None Include="..\hw4-scenes\mis.test" />
     <None Include="..\scenes\scene4-ambient.test" />
     <None Include="..\scenes\scene4-diffuse.test" />
     <None Include="..\scenes\scene4-emission.test" />

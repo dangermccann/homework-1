@@ -178,6 +178,9 @@ void OptiXTracer::InitProgram() {
 
 	cudaGetDeviceProperties(&deviceProps, 0);
 
+	// Prevent CPU polling during sync
+	cudaSetDeviceFlags(cudaDeviceScheduleBlockingSync);
+
 
 	//
 	// Create module
@@ -957,6 +960,7 @@ void OptiXTracer::Trace(const Scene & scene)
 	params.nee = scene.nextEventEstimation;
 	params.spp = scene.spp;
 	params.russian_roulette = scene.russianRoulette;
+	params.importance_sampling = scene.importanceSampling;
 
 	SetupCamera(scene);
 	SetupLights(scene);

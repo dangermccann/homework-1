@@ -16,6 +16,7 @@ Scene::Scene()
 	nextEventEstimation = 0;
 	russianRoulette = 0;
 	spp = 1;
+	importanceSampling = 0;
 }
 
 
@@ -100,6 +101,17 @@ int Scene::Parse(LPCWSTR path)
 
 					if (onOff == "on")
 						russianRoulette = 1;
+				}
+				else if (cmd == "importancesampling") {
+					std::string is;
+					s >> is;
+
+					if (is == "hemisphere")
+						importanceSampling = 0;
+					else if (is == "cosine")
+						importanceSampling = 1;
+					else if (is == "brdf")
+						importanceSampling = 2;
 				}
 				else if (cmd == "output") {
 					s >> outputFileName;
