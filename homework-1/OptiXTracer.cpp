@@ -134,8 +134,10 @@ void compilePTX(const char* name, const char* cuSource, std::string& ptx, const 
 		if (log_string)
 			*log_string = g_nvrtcLog.c_str();
 	}
-	if (compileRes != NVRTC_SUCCESS)
+	if (compileRes != NVRTC_SUCCESS) {
+		OutputDebugStringA(g_nvrtcLog.c_str());
 		throw std::runtime_error("NVRTC Compilation failed.\n" + g_nvrtcLog);
+	}
 
 	// Retrieve PTX code
 	size_t ptx_size = 0;
@@ -363,6 +365,8 @@ void PopulateHitGroupRecord(HitGroupSbtRecord& rec, const Geometry& geometry)
 	rec.data.emission = ctf3(geometry.material.emission);
 	rec.data.ambient = ctf3(geometry.material.ambient);
 	rec.data.shininess = geometry.material.shininess;
+	rec.data.roughness = geometry.material.roughness;
+	rec.data.brdf_algorithm = geometry.material.brdfAlgorithm;
 
 	geometry.transform.ToArray16(rec.data.transform);
 	geometry.transform.Invert().ToArray16(rec.data.inverseTransform);
@@ -961,6 +965,7 @@ void OptiXTracer::Trace(const Scene & scene)
 	params.spp = scene.spp;
 	params.russian_roulette = scene.russianRoulette;
 	params.importance_sampling = scene.importanceSampling;
+	params.gamma = scene.gamma;
 
 	SetupCamera(scene);
 	SetupLights(scene);

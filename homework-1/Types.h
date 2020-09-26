@@ -32,6 +32,12 @@ enum ImportanceSampling
 	BRDF = 2
 };
 
+enum BRDFAlgorithm
+{
+	PHONG,
+	GGX
+};
+
 struct Params
 {
 	uchar4* image;
@@ -52,6 +58,7 @@ struct Params
 	unsigned int spp;
 	unsigned int russian_roulette;
 	unsigned int importance_sampling;
+	float gamma;
 };
 
 
@@ -79,6 +86,8 @@ struct HitGroupData
 	float3 ambient;
 	float3 verticies[3];
 	float shininess;
+	float roughness;
+	unsigned int brdf_algorithm;
 	float transform[16];
 	float inverseTransform[16];
 	float inverseWithoutTranslate[16];

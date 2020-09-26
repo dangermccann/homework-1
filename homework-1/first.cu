@@ -139,6 +139,17 @@ static __forceinline__ __device__ void transpose(float (& t)[16])
 	t[14] = t1[11];
 }
 
+static __forceinline__ __device__ uchar4 make_color_no_gamma(float3 c)
+{
+	return make_uchar4(quantizeUnsigned8Bits(c.x), quantizeUnsigned8Bits(c.y), quantizeUnsigned8Bits(c.z), 255u);
+}
+
+
+float __forceinline__ __device__ avgf3(float3 f3)
+{
+	return (f3.x + f3.y + f3.z) / 3.0f;
+}
+
 
 static __forceinline__ __device__ bool traceOcclusion(
 	OptixTraversableHandle handle,
@@ -204,18 +215,6 @@ static __forceinline__ __device__ float3 traceRadiance(
 
 
 
-static __forceinline__ __device__ uchar4 make_color_no_gamma(float3 c)
-{
-	return make_uchar4(quantizeUnsigned8Bits(c.x), quantizeUnsigned8Bits(c.y), quantizeUnsigned8Bits(c.z), 255u);
-}
-
-
-float avgf3(float3 f3)
-{
-	return (f3.x + f3.y + f3.z) / 3.0f;
-}
-
-
 extern "C"
 __global__ void __raygen__rg()
 {
@@ -247,6 +246,11 @@ __global__ void __raygen__rg()
 
 	// Take the average of the samples for this pixel
 	result /= params.spp;
+
+	// gamma correction
+	result.x = pow(result.x, 1.0f / params.gamma);
+	result.y = pow(result.y, 1.0f / params.gamma);
+	result.z = pow(result.z, 1.0f / params.gamma);
 
 	// Record results in our output raster
 	params.image[idx.y * params.image_width + idx.x] = make_color_no_gamma(result);
@@ -389,12 +393,24 @@ float3 analyticDirectShade(float3 N, HitGroupData* hit_data)
 	return c;
 }
 
-float3 reflect2(float3 N, float3 dir)
+float3 reflect2(const float3 N, const float3 dir)
 {
 	return (2.0f * dot0(dir, N) * N) - dir;
 }
 
-float3 brdf(float3 omegaI, float3 dir, float3 N, float3 kd, float3 ks, float s) 
+float3 rotate2(const float3 s, const float3 sRot)
+{
+	float3 a = make_float3(0, 1, 0);
+	if (dot(a, sRot) > 0.9)
+		a = make_float3(1, 0, 0);
+	float3 w = normalize(sRot);
+	float3 u = normalize(cross(a, w));
+	float3 v = cross(w, u);
+
+	return s.x * u + s.y * v + s.z * w;
+}
+
+float3 phong(const float3 omegaI, const float3 dir, const float3 N, const float3 kd, const float3 ks, const float s)
 {
 	// reflection vector of sample
 	float3 refl = normalize(reflect2(N, -dir));
@@ -407,6 +423,59 @@ float3 brdf(float3 omegaI, float3 dir, float3 N, float3 kd, float3 ks, float s)
 
 	return result;
 }
+
+
+float microfacetDF(const float3 h, const float3 N, const float roughness)
+{
+	float thetaH = acos(dot(h, N));
+
+	float D = (pow(roughness, 2.0f)) /
+		(PI * pow(cos(thetaH), 4.0f) * pow(pow(roughness, 2.0f) + pow(tan(thetaH), 2.0f), 2.0f));
+	
+	return D;
+}
+
+float smithG(const float3 v, const float3 N, const float roughness)
+{
+	if (dot(v, N) > 0)
+	{
+		float thetaV = acos(dot(v, N));
+		return 2.0f / (1.0f + sqrt( 1.0f + pow(roughness, 2.0f) * pow(tan(thetaV), 2.0f)));
+	}
+	else
+	{
+		return 0;
+	}
+}
+
+
+
+
+float3 ggx(const float3 omegaI, const float3 dir, const float3 N, const float3 kd, const float3 ks, const float roughness)
+{
+	float omegaIDotN = dot(omegaI, N);
+	float omegaODotN = dot(dir, N);
+
+	if (omegaIDotN <= 0 || omegaODotN <= 0)
+		return make_float3(0);
+
+	float3 h = normalize(omegaI + dir);
+
+	// microfacet distribution function
+	float D = microfacetDF(h, N, roughness);
+
+	// shadowing-masking function
+	float G = smithG(omegaI, N, roughness) * smithG(dir, N, roughness);
+
+	// Fresnel estimation 
+	float3 F = ks + (1.0f - ks) * pow(1.0f - dot(omegaI, h), 5.0f);
+
+	// complete BRDF including diffuse component 
+	return (kd / PI) + (F * G * D) / (4 * omegaIDotN * omegaODotN);
+}
+
+
+
 
 float3 directShade(float3 N, HitGroupData* hit_data) 
 {
@@ -471,7 +540,7 @@ float3 directShade(float3 N, HitGroupData* hit_data)
 			float V = occluded ? 0 : 1;
 
 			// BRDF
-			float3 f = brdf(omegaI, dir, N, hit_data->diffuse, hit_data->specular, hit_data->shininess);
+			float3 f = phong(omegaI, dir, N, hit_data->diffuse, hit_data->specular, hit_data->shininess);
 
 			col += V * f * nDotWi * LnDotWi / (R * R);	// Put it all together
 		}
@@ -481,6 +550,92 @@ float3 directShade(float3 N, HitGroupData* hit_data)
 
 	return fc;
 }
+
+float3 samplePhong(const float3 N, const float3 dir, const HitGroupData* hit_data, TraceData* td, const float t)
+{
+
+	// randomly generate hemisphere sample
+	float psi0;
+	float psi1 = rnd(td->seed);
+	float psi2 = rnd(td->seed);
+	// rotate sample to be centered about normal N or reflection vector
+	float3 sRot = N;
+	float3 omegaI;			// direction of sample
+
+	if (params.importance_sampling == COSINE)
+	{
+		psi1 = sqrt(psi1);
+	}
+	else if (params.importance_sampling == BRDF)
+	{
+		psi0 = rnd(td->seed);
+		
+		if (psi0 <= t)
+		{
+			psi1 = pow(psi1, (1.0f / (hit_data->shininess + 1)));
+			sRot = normalize(reflect2(N, -dir)); 
+		}
+		else
+		{
+			psi1 = sqrt(psi1);
+		}
+		
+	}
+
+	float theta = acos(clamp(psi1, 0.0f, 1.0f));		// random number between pi/2 and 0
+	float phi = 2.0f * PI * psi2;						// random number between 0 and 2*pi
+
+	// calcualte sample in cartesian coordinates 
+	float3 s = make_float3(cos(phi) * sin(theta), sin(phi) * sin(theta), cos(theta));
+
+	// Rotate sample and normalize
+	omegaI = normalize(rotate2(s, sRot));
+	//omegaI = normalize(s);
+	
+
+
+	return omegaI;
+}
+
+
+float3 sampleGGX(const float3 N, const float3 dir, const HitGroupData* hit_data, TraceData* td, const float t)
+{
+	// randomly generate hemisphere sample
+	float psi1 = rnd(td->seed);
+	float psi2 = rnd(td->seed);
+
+	// rotate sample to be centered about normal N or reflection vector
+	float3 omegaI;			// direction of sample
+
+	float psi0 = rnd(td->seed);
+	if (psi0 <= t)
+	{
+		// specular 
+		psi1 = pow(psi1, (1.0f / (hit_data->shininess + 1)));
+
+		float phi = 2.0f * PI * psi2;
+		float theta = atan((hit_data->roughness * sqrt(psi1)) / sqrt(1.0f - psi1));
+		float3 h = make_float3(cos(phi) * sin(theta), sin(phi) * cos(theta), cos(theta));
+		h = rotate2(h, N);
+		omegaI = normalize(reflect2(h, dir));
+	}
+	else
+	{
+		// diffuse 
+		float theta = acos(clamp(sqrt(psi1), 0.0f, 1.0f));		// random number between pi/2 and 0
+		float phi = 2.0f * PI * psi2;						// random number between 0 and 2*pi
+
+		// calcualte sample in cartesian coordinates 
+		float3 s = make_float3(cos(phi) * sin(theta), sin(phi) * sin(theta), cos(theta));
+
+		// Rotate sample and normalize
+		omegaI = normalize(rotate2(s, N));
+	}
+
+
+	return omegaI;
+}
+
 
 float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 {
@@ -512,156 +667,128 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 	const float3 dir = optixGetWorldRayDirection();
 	const float3 P = orig + optixGetRayTmax() * dir; // hit point
 
-	// randomly generate hemisphere sample
-	float psi1 = rnd(td->seed);
-	float psi2 = rnd(td->seed);
 	float t = avgf3(hit_data->specular) / (avgf3(hit_data->diffuse) + avgf3(hit_data->specular));
-	int specularSelect = 0;
 
-	if (params.importance_sampling == COSINE) 
-	{
-		psi1 = sqrt(psi1);
-	}
-	else if (params.importance_sampling == BRDF)
-	{
-		float psi0 = rnd(td->seed);
-		if (psi1 <= t) 
-		{
-			psi1 = pow(psi1, (1.0f / (hit_data->shininess + 1)));
-			specularSelect = 1;
-		}
-		else
-		{
-			psi1 = sqrt(psi1);
-		}
-	}
+	float3 omegaI;
 
-
-	float theta = acos(clamp(psi1, 0.0f, 1.0f));		// random number between pi/2 and 0
-	float phi = 2.0f * PI * psi2;						// random number between 0 and 2*pi
-
-	// calcualte sample in cartesian coordinates 
-	float3 s = make_float3(cos(phi) * sin(theta), sin(phi) * sin(theta), cos(theta));
-	//s = clamp(s, 0.0f, 1.0f);
-
-	// rotate sample to be centered about normal N or reflection vector
-	float3 sRot = N;
-	if (params.importance_sampling == BRDF && specularSelect == 1)
-		sRot = reflect2(N, -dir);
-
-	float3 a = make_float3(0, 1, 0);
-	if (dot(a, sRot) > 0.9)
-		a = make_float3(1, 0, 0);
-	float3 w = normalize(sRot);
-	float3 u = normalize(cross(a, w));
-	float3 v = cross(w, u);
-
-	// direction vector to next sample
-	float3 omegaI = normalize(s.x * u + s.y * v + s.z * w);
+	
+	
 
 	// BRDF
-	float3 f = brdf(omegaI, dir, N, hit_data->diffuse, hit_data->specular, hit_data->shininess);
+	float3 f;
+	if (hit_data->brdf_algorithm == PHONG)
+	{
+		omegaI = samplePhong(N, dir, hit_data, td, t);
+		f = phong(omegaI, dir, N, hit_data->diffuse, hit_data->specular, hit_data->shininess);
+	}
+	if (hit_data->brdf_algorithm == GGX)
+	{
+		omegaI = sampleGGX(N, dir, hit_data, td, t);
+		f = ggx(omegaI, dir, N, hit_data->diffuse, hit_data->specular, hit_data->roughness);
+	}
 
 	float nDotWi = dot0(N, omegaI);				// Cosine component
 
 
 
 
-	
-	float3 pt = td->throughput;
+	// Calculate throughput for current hop in path
+	// At the highest level this is calculated as : f / pdf
+	// Or: the BRDF evaluation divided by the probability distribution function result
+	// We have two BRDF algoritms: Modified Phong and GGX
+	float3 throughput = make_float3(0);
+	if (hit_data->brdf_algorithm == PHONG)
+	{
+		if (params.importance_sampling == HEMISPHERE)
+		{
+			throughput = (2.0f * PI * f * nDotWi);
+		}
+		else if (params.importance_sampling == COSINE)
+		{
+			throughput = (PI * f);	// here the cosine term has canceled out
+		}
+		else if (params.importance_sampling == BRDF)
+		{
+			float3 refl = normalize(reflect2(N, -dir));
+			float rDotWi = dot0(refl, omegaI);
+
+
+			float pdf = (1.0f - t) * (nDotWi / PI) +
+				t * (hit_data->shininess + 1.0f) * pow(rDotWi, hit_data->shininess) / (2.0f * PI);
+
+			if (nDotWi <= 0 || rDotWi <= 0)
+			{
+				throughput = make_float3(0);
+			}
+			else
+			{
+				throughput = (f / pdf) * nDotWi;
+				//throughput = clamp(f, 0.0f, 1.0f);
+				//throughput = (PI * f);
+
+				/*
+				uint3 li = optixGetLaunchIndex();
+				if (length(hit_data->specular) <= 0 && li.x % 50 == 0 && li.y % 50 == 0)
+				{
+					printf("(%03d, %03d) x %d : [%f, %f, %f] t: %f [%f] | [%f, %f, %f]\n",
+						li.x, li.y, td->depth, f.x, f.y, f.z, t, pdf, throughput.x, throughput.y, throughput.z);
+				}
+				*/
+			}
+
+			
+		}
+	}
+	else if (hit_data->brdf_algorithm == GGX)
+	{
+		
+		t = fmax(0.25f, t);
+
+		if (length(hit_data->diffuse) + length(hit_data->specular) <= 0)
+			t = 1;
+
+		float3 h = normalize(omegaI - dir);
+		float pdf = (1.0f - t) * dot(N, omegaI) / PI;
+		pdf += t * microfacetDF(h, N, hit_data->roughness) * dot0(N, h) / (4 * dot0(h, omegaI));
+		
+		throughput = (f / pdf) * nDotWi;
+		
+	}
+
+
 
 	// 
 	// If using Russian Roulette terminate based on probability q
 	//
-	float q = 1;						// termination probability 
-	float rrBoost = 1.0f;
-	int rrTerminate = 0;
-
-	// Apply throughput for next hop in path
-	if (params.importance_sampling == HEMISPHERE)
-	{
-		td->throughput *= (2.0f * PI * f * nDotWi);
-	}
-	else if (params.importance_sampling == COSINE)
-	{
-		td->throughput *= (PI * f);
-	}
-	else if (params.importance_sampling == BRDF)
-	{
-		float3 refl = normalize(reflect(N, -dir));
-		float rDotWi = dot0(refl, omegaI);
-		float pdf = ((1.0f - t) * nDotWi / PI) +
-			(t * (hit_data->shininess + 1) / (2.0f * PI) * pow(rDotWi, hit_data->shininess));
-
-		//td->throughput *= f / pdf;
-		td->throughput *= (PI * f);
-	}
-
-
 	if (params.russian_roulette == 1)
 	{
+		float q = 1;						// termination probability 
+		float rrBoost = 1.0f;				// boost factor for rays that continue
+
 		// choose paths with lower throughput to terminate more frequently 
 		q = 1.0f - fmin(fmax(fmax(td->throughput.x, td->throughput.y), td->throughput.z), 1.0f);
-		//q = 0.5f;
 		float p = rnd(td->seed);
 		if (p < q || q >= 1.0f)
 		{
-			rrTerminate = 1;		// terminate
+			return make_float3(0);			// terminate
 		}
 		else
 		{
 			rrBoost = 1.0f / (1.0f - q);	// boost paths that are not terminated 
 		}
-	}
 
-	td->throughput *= rrBoost;
-	
-	if (0)
-	{
-		uint3 li = optixGetLaunchIndex();
-		if (li.x % 50 == 0 && li.y % 50 == 0)
-		{
-			float3 ct = td->throughput;
-
-			printf("(%03d, %03d) x %d : [%f, %f, %f] %d [%f, %f, %f]\n",
-				li.x, li.y, td->depth, pt.x, pt.y, pt.z, rrTerminate,
-				ct.x, ct.y, ct.z);
-		}
+		throughput *= rrBoost;
 	}
 
 
-	if (rrTerminate)
-	{
-		return make_float3(0);
-	}
-
+	td->throughput *= throughput;
 
 
 	// Recursively sample next color along path
 	float3 nextColor = traceRadiance(params.handle, P + EPSILON * N, omegaI, td->depth + 1, td->seed, td->throughput);
 
 	// final illumination function 
-	float3 Lo;
-	if (params.importance_sampling == HEMISPHERE)
-	{
-		Lo = 2.0f * PI * f * nextColor * nDotWi * rrBoost;
-	}
-	else if (params.importance_sampling == COSINE)
-	{
-		Lo = PI * f * nextColor * rrBoost;
-	}
-	else if (params.importance_sampling == BRDF)
-	{
-		float3 refl = normalize(reflect(N, -dir));
-		float rDotWi = dot0(refl, omegaI);
-		float pdf = ((1.0f - t) * nDotWi / PI) + 
-			(t * (hit_data->shininess + 1) / (2.0f * PI) * pow(rDotWi, hit_data->shininess));
-
-		//Lo = nextColor * f / pdf;
-		Lo = PI * f * nextColor * rrBoost;
-	}
-
-	return Lo;
+	return throughput * nextColor;
 }
 
 
@@ -695,6 +822,37 @@ void shade(float3 N, HitGroupData* hit_data)
 		}
 	}
 }
+
+
+/*
+
+	if (0)
+	{
+		uint3 li = optixGetLaunchIndex();
+		if (li.x % 50 == 0 && li.y % 50 == 0)
+		{
+			float3 ct = td->throughput;
+
+			printf("(%03d, %03d) x %d : [%f, %f, %f] %d [%f, %f, %f]\n",
+				li.x, li.y, td->depth, pt.x, pt.y, pt.z, rrTerminate,
+				ct.x, ct.y, ct.z);
+		}
+	}
+
+
+
+
+
+
+void printRay(float3 orig, float3 dir)
+{
+	printf("origin: %f, %f, %f | dir: %f, %f, %f \n", orig.x, orig.y, orig.z, dir.x, dir.y, dir.z);
+}
+
+
+	*/
+
+
 
 
 extern "C" __global__ void __closesthit__primative()
@@ -804,12 +962,6 @@ bool intersect_sphere(HitGroupData* hg_data, float3 orig, float3 dir, float3 &no
 	}
 
 	return false;
-}
-
-
-void printRay(float3 orig, float3 dir)
-{
-	printf("origin: %f, %f, %f | dir: %f, %f, %f \n", orig.x, orig.y, orig.z, dir.x, dir.y, dir.z);
 }
 
 

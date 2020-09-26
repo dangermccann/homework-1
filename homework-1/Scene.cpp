@@ -17,6 +17,7 @@ Scene::Scene()
 	russianRoulette = 0;
 	spp = 1;
 	importanceSampling = 0;
+	gamma = 1;
 }
 
 
@@ -112,6 +113,19 @@ int Scene::Parse(LPCWSTR path)
 						importanceSampling = 1;
 					else if (is == "brdf")
 						importanceSampling = 2;
+				}
+				else if (cmd == "brdf") {
+					std::string brdfVal;
+					s >> brdfVal;
+
+					if (brdfVal == "ggx")
+						material.brdfAlgorithm = 1;
+				}
+				else if (cmd == "gamma") {
+					if (ReadVals(s, 1, values)) {
+						gamma = values[0];
+					}
+					else { return ERR_INVALID_FILE; }
 				}
 				else if (cmd == "output") {
 					s >> outputFileName;
@@ -286,6 +300,12 @@ int Scene::Parse(LPCWSTR path)
 				else if (cmd == "shininess") {
 					if (ReadVals(s, 1, values)) {
 						material.shininess = values[0];
+					}
+					else { return ERR_INVALID_FILE; }
+				}
+				else if (cmd == "roughness") {
+					if (ReadVals(s, 1, values)) {
+						material.roughness = values[0];
 					}
 					else { return ERR_INVALID_FILE; }
 				}

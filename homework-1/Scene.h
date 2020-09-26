@@ -14,9 +14,13 @@ public:
 	Color3 diffuse, specular, emission;
 	Color3 ambient;
 	float shininess;
+	float roughness;
+	int brdfAlgorithm;
 
 	Material() {
 		shininess = 0;
+		roughness = 0;
+		brdfAlgorithm = 0;
 	}
 };
 
@@ -82,6 +86,7 @@ class Scene
 public:
 	int width, height, maxDepth, lightSamples, spp;
 	int lightStratify, nextEventEstimation, russianRoulette, importanceSampling;
+	float gamma;
 	std::string outputFileName;
 	std::string integrator;
 	Scene();
