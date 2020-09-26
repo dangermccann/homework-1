@@ -427,7 +427,7 @@ float3 phong(const float3 omegaI, const float3 dir, const float3 N, const float3
 
 float microfacetDF(const float3 h, const float3 N, const float roughness)
 {
-	float thetaH = acos(dot(h, N));
+	float thetaH = acos(dot0(h, N));
 
 	float D = (pow(roughness, 2.0f)) /
 		(PI * pow(cos(thetaH), 4.0f) * pow(pow(roughness, 2.0f) + pow(tan(thetaH), 2.0f), 2.0f));
@@ -454,18 +454,18 @@ float smithG(const float3 v, const float3 N, const float roughness)
 float3 ggx(const float3 omegaI, const float3 dir, const float3 N, const float3 kd, const float3 ks, const float roughness)
 {
 	float omegaIDotN = dot(omegaI, N);
-	float omegaODotN = dot(dir, N);
+	float omegaODotN = dot(-dir, N);
 
 	if (omegaIDotN <= 0 || omegaODotN <= 0)
 		return make_float3(0);
 
-	float3 h = normalize(omegaI + dir);
+	float3 h = normalize(omegaI - dir);
 
 	// microfacet distribution function
 	float D = microfacetDF(h, N, roughness);
 
 	// shadowing-masking function
-	float G = smithG(omegaI, N, roughness) * smithG(dir, N, roughness);
+	float G = smithG(omegaI, N, roughness) * smithG(-dir, N, roughness);
 
 	// Fresnel estimation 
 	float3 F = ks + (1.0f - ks) * pow(1.0f - dot(omegaI, h), 5.0f);
@@ -540,7 +540,15 @@ float3 directShade(float3 N, HitGroupData* hit_data)
 			float V = occluded ? 0 : 1;
 
 			// BRDF
-			float3 f = phong(omegaI, dir, N, hit_data->diffuse, hit_data->specular, hit_data->shininess);
+			float3 f;
+			if (hit_data->brdf_algorithm == PHONG)
+			{
+				f = phong(omegaI, dir, N, hit_data->diffuse, hit_data->specular, hit_data->shininess);
+			}
+			else if (hit_data->brdf_algorithm == GGX)
+			{
+				f = ggx(omegaI, dir, N, hit_data->diffuse, hit_data->specular, hit_data->roughness);
+			}
 
 			col += V * f * nDotWi * LnDotWi / (R * R);	// Put it all together
 		}
@@ -551,10 +559,43 @@ float3 directShade(float3 N, HitGroupData* hit_data)
 	return fc;
 }
 
+float3 sampleHemisphere(const float3 N, const float3 dir, const HitGroupData* hit_data, TraceData* td, const float t)
+{
+	// randomly generate hemisphere sample
+	float psi1 = rnd(td->seed);
+	float psi2 = rnd(td->seed);
+
+	float theta = acos(clamp(psi1, 0.0f, 1.0f));		// random number between pi/2 and 0
+	float phi = 2.0f * PI * psi2;						// random number between 0 and 2*pi
+
+	// calcualte sample in cartesian coordinates 
+	float3 s = make_float3(cos(phi) * sin(theta), sin(phi) * sin(theta), cos(theta));
+
+	// Rotate sample and normalize
+	return normalize(rotate2(s, N));
+}
+
+float3 sampleCosine(const float3 N, const float3 dir, const HitGroupData* hit_data, TraceData* td, const float t)
+{
+	// generate sample based on cosine
+	float psi1 = sqrt(rnd(td->seed));
+	float psi2 = rnd(td->seed);
+
+	float theta = acos(clamp(psi1, 0.0f, 1.0f));		// random number between pi/2 and 0
+	float phi = 2.0f * PI * psi2;						// random number between 0 and 2*pi
+
+	// calcualte sample in cartesian coordinates 
+	float3 s = make_float3(cos(phi) * sin(theta), sin(phi) * sin(theta), cos(theta));
+
+	// Rotate sample and normalize
+	return normalize(rotate2(s, N));
+}
+
+
+
 float3 samplePhong(const float3 N, const float3 dir, const HitGroupData* hit_data, TraceData* td, const float t)
 {
-
-	// randomly generate hemisphere sample
+	// sample based on phong BRDF
 	float psi0;
 	float psi1 = rnd(td->seed);
 	float psi2 = rnd(td->seed);
@@ -562,25 +603,18 @@ float3 samplePhong(const float3 N, const float3 dir, const HitGroupData* hit_dat
 	float3 sRot = N;
 	float3 omegaI;			// direction of sample
 
-	if (params.importance_sampling == COSINE)
+	psi0 = rnd(td->seed);
+		
+	if (psi0 <= t)
+	{
+		psi1 = pow(psi1, (1.0f / (hit_data->shininess + 1)));
+		sRot = normalize(reflect2(N, -dir)); 
+	}
+	else
 	{
 		psi1 = sqrt(psi1);
 	}
-	else if (params.importance_sampling == BRDF)
-	{
-		psi0 = rnd(td->seed);
-		
-		if (psi0 <= t)
-		{
-			psi1 = pow(psi1, (1.0f / (hit_data->shininess + 1)));
-			sRot = normalize(reflect2(N, -dir)); 
-		}
-		else
-		{
-			psi1 = sqrt(psi1);
-		}
-		
-	}
+	
 
 	float theta = acos(clamp(psi1, 0.0f, 1.0f));		// random number between pi/2 and 0
 	float phi = 2.0f * PI * psi2;						// random number between 0 and 2*pi
@@ -615,7 +649,7 @@ float3 sampleGGX(const float3 N, const float3 dir, const HitGroupData* hit_data,
 
 		float phi = 2.0f * PI * psi2;
 		float theta = atan((hit_data->roughness * sqrt(psi1)) / sqrt(1.0f - psi1));
-		float3 h = make_float3(cos(phi) * sin(theta), sin(phi) * cos(theta), cos(theta));
+		float3 h = make_float3(cos(phi) * sin(theta), sin(phi) * sin(theta), cos(theta));
 		h = rotate2(h, N);
 		omegaI = normalize(reflect2(h, dir));
 	}
@@ -669,27 +703,45 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 
 	float t = avgf3(hit_data->specular) / (avgf3(hit_data->diffuse) + avgf3(hit_data->specular));
 
+	// Calculate sample
 	float3 omegaI;
+	if (params.importance_sampling == HEMISPHERE)
+	{
+		omegaI = sampleHemisphere(N, dir, hit_data, td, t);
+	}
+	else if (params.importance_sampling == COSINE)
+	{
+		omegaI = sampleCosine(N, dir, hit_data, td, t);
+	}
+	else if (params.importance_sampling == BRDF)
+	{
+		if (hit_data->brdf_algorithm == PHONG)
+		{
+			omegaI = samplePhong(N, dir, hit_data, td, t);
+		}
+		else if (hit_data->brdf_algorithm == GGX)
+		{
+			omegaI = sampleGGX(N, dir, hit_data, td, t);
+		}
+	}
 
-	
+	float nDotWi = dot0(N, omegaI);				// Cosine component
 	
 
-	// Sample and evaluate BRDF
+	// Evaluate BRDF
 	float3 f;
 	if (hit_data->brdf_algorithm == PHONG)
 	{
-		omegaI = samplePhong(N, dir, hit_data, td, t);
+		
 		f = phong(omegaI, dir, N, hit_data->diffuse, hit_data->specular, hit_data->shininess);
 	}
 	if (hit_data->brdf_algorithm == GGX)
 	{
-		omegaI = sampleGGX(N, dir, hit_data, td, t);
+		
 		f = ggx(omegaI, dir, N, hit_data->diffuse, hit_data->specular, hit_data->roughness);
 	}
 
-	float nDotWi = dot0(N, omegaI);				// Cosine component
-
-
+	
 
 
 	// Calculate throughput for current hop in path
@@ -697,17 +749,19 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 	// Or: the BRDF evaluation divided by the probability distribution function result
 	// We have two BRDF algoritms: Modified Phong and GGX
 	float3 throughput = make_float3(0);
-	if (hit_data->brdf_algorithm == PHONG)
+	
+	
+	if (params.importance_sampling == HEMISPHERE)
 	{
-		if (params.importance_sampling == HEMISPHERE)
-		{
-			throughput = (2.0f * PI * f * nDotWi);
-		}
-		else if (params.importance_sampling == COSINE)
-		{
-			throughput = (PI * f);	// here the cosine term has canceled out
-		}
-		else if (params.importance_sampling == BRDF)
+		throughput = (2.0f * PI * f * nDotWi);
+	}
+	else if (params.importance_sampling == COSINE)
+	{
+		throughput = (PI * f);	// here the cosine term has canceled out
+	}
+	else if (params.importance_sampling == BRDF)
+	{
+		if (hit_data->brdf_algorithm == PHONG)
 		{
 			float3 refl = normalize(reflect2(N, -dir));
 			float rDotWi = dot0(refl, omegaI);
@@ -715,25 +769,25 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 			float pdf = (1.0f - t) * (nDotWi / PI) +
 				t * (hit_data->shininess + 1.0f) * pow(rDotWi, hit_data->shininess) / (2.0f * PI);
 
+			throughput = (f / pdf) * nDotWi;
+		}
+		else if (hit_data->brdf_algorithm == GGX)
+		{
+
+			t = fmax(0.25f, t);
+
+			if (length(hit_data->diffuse) + length(hit_data->specular) <= 0)
+				t = 1;
+
+			float3 h = normalize(omegaI - dir);
+			float pdf = (1.0f - t) * dot(N, omegaI) / PI;
+			pdf += t * microfacetDF(h, N, hit_data->roughness) * dot0(N, h) / (4.0f * dot0(h, omegaI));
 
 			throughput = (f / pdf) * nDotWi;
 		}
 	}
-	else if (hit_data->brdf_algorithm == GGX)
-	{
-		
-		t = fmax(0.25f, t);
-
-		if (length(hit_data->diffuse) + length(hit_data->specular) <= 0)
-			t = 1;
-
-		float3 h = normalize(omegaI - dir);
-		float pdf = (1.0f - t) * dot(N, omegaI) / PI;
-		pdf += t * microfacetDF(h, N, hit_data->roughness) * dot0(N, h) / (4 * dot0(h, omegaI));
-		
-		throughput = (f / pdf) * nDotWi;
-		
-	}
+	
+	
 
 
 

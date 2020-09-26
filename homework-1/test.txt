@@ -1,98 +1,82 @@
-#Cornell Box
-size 480 480
+size 1280 280
 integrator pathtracer
 spp 64
+gamma 2.2
 importancesampling brdf
 nexteventestimation on
 russianroulette on
-camera 0 1 3 0 1 0 0 1 0 45
-output cornellBRDF.png
+camera  0 2 15  0 -3 2.5  0 1 0  13
+output ggx.png
 
 maxdepth -1
 
 
-maxverts 4
-#planar face
-vertex -1 +1 0
-vertex -1 -1 0
-vertex +1 -1 0
-vertex +1 +1 0
+maxverts 8
+
+vertex -20 -4 -2
+vertex -20 -4 20
+vertex 20 -4 -2
+vertex 20 -4 20
+
+vertex -20 -4 -2
+vertex -20 20 -2
+vertex 20 -4 -2
+vertex 20 20 -2
 
 
+# default material settings
+brdf phong
 ambient 0 0 0
 specular 0 0 0
-shininess 1000
+shininess 30
 emission 0 0 0
+diffuse 1 1 1
+roughness 1
+
+# floor
+tri 0 1 2
+tri 3 2 1
+
+# back wall
+tri 6 5 4
+tri 5 6 7
+
+# sphere default material settings
+brdf ggx
+diffuse 0.5 0.5 0.5
+specular 0.5 0.5 0.5
+roughness 0.5
+
 diffuse 0 0 0
+specular 0.9 0.2 0.07
+roughness 0.25
+sphere -5.27 -3 2.5  1
 
-quadLight -0.25 1.999 -0.25 0 0 0.5  0.5 0 0  30 26 21
+diffuse 0 0 0
+specular 0.9 0.2 0.07
+roughness 0.05
+sphere -3.14 -3 2.5  1
 
-#point 0 0.44 2 0.8 0.8 0.8
+diffuse 0 0.55 0.1
+specular 0.1 0.1 0.1
+roughness 0.12
+sphere -1.04 -3 2.5  1
 
-diffuse 0 0 0.8
-#sphere 0 0.8 -1.5 0.1
+diffuse 0.01 0.01 0.4
+specular 0.02 0.02 0.02
+roughness 0.01
+sphere 1.04 -3 2.5  1
 
+diffuse 0 0 0
+specular 0 0 0
+roughness 0.01
+sphere 3.14 -3 2.5  1
 
-pushTransform
+diffuse 0 0 0
+specular 1 0.17 0.1
+roughness 0.7
+sphere 5.27 -3 2.5  1
 
-#red
-pushTransform
-translate -1 1 0
-rotate 0 1 0 90
-scale 1 1 1
-diffuse 0.8 0 0
-tri 0 1 2
-tri 0 2 3
-popTransform
-
-#green
-pushTransform
-translate 1 1 0
-rotate 0 1 0 -90
-scale 1 1 1
-diffuse 0 0.8 0
-tri 0 1 2
-tri 0 2 3
-popTransform
-
-#back
-pushTransform
-scale 1 1 1
-translate 0 1 -1
-diffuse 0.8 0.8 0.8
-tri 0 1 2
-tri 0 2 3
-popTransform
-
-#top
-pushTransform
-translate 0 2 0
-rotate 1 0 0 90
-scale 1 1 1
-diffuse 0.8 0.8 0.8
-tri 0 1 2
-tri 0 2 3
-popTransform
-
-#bottom
-pushTransform
-translate 0 0 0
-rotate 1 0 0 -90
-scale 1 1 1
-diffuse 0.8 0.8 0.8
-tri 0 1 2
-tri 0 2 3
-popTransform
-
-#sphere
-diffuse 0.2 0.2 0.2
-specular 0.8 0.8 0.8
-pushTransform
-translate 0 0.5 0
-scale 0.5 0.5 0.5
-
-sphere 0 0 0 1
-
-popTransform
-
-popTransform
+# overhead light
+quadLight  10 50 25  0 -6 6  10 0 0  110 105 95
+quadLight  -20 50 25  0 -6 6  10 0 0  10 15 25
