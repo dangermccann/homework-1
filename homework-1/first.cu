@@ -674,7 +674,7 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 	
 	
 
-	// BRDF
+	// Sample and evaluate BRDF
 	float3 f;
 	if (hit_data->brdf_algorithm == PHONG)
 	{
@@ -712,31 +712,11 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 			float3 refl = normalize(reflect2(N, -dir));
 			float rDotWi = dot0(refl, omegaI);
 
-
 			float pdf = (1.0f - t) * (nDotWi / PI) +
 				t * (hit_data->shininess + 1.0f) * pow(rDotWi, hit_data->shininess) / (2.0f * PI);
 
-			if (nDotWi <= 0 || rDotWi <= 0)
-			{
-				throughput = make_float3(0);
-			}
-			else
-			{
-				throughput = (f / pdf) * nDotWi;
-				//throughput = clamp(f, 0.0f, 1.0f);
-				//throughput = (PI * f);
 
-				/*
-				uint3 li = optixGetLaunchIndex();
-				if (length(hit_data->specular) <= 0 && li.x % 50 == 0 && li.y % 50 == 0)
-				{
-					printf("(%03d, %03d) x %d : [%f, %f, %f] t: %f [%f] | [%f, %f, %f]\n",
-						li.x, li.y, td->depth, f.x, f.y, f.z, t, pdf, throughput.x, throughput.y, throughput.z);
-				}
-				*/
-			}
-
-			
+			throughput = (f / pdf) * nDotWi;
 		}
 	}
 	else if (hit_data->brdf_algorithm == GGX)
