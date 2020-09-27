@@ -119,6 +119,11 @@ static __forceinline__ __device__ float dot0(float3 f1, float3 f2)
 	return fmax(dot(f1, f2), 0.0f);
 }
 
+static __forceinline__ __device__ float dotC(float3 f1, float3 f2)
+{
+	return clamp(dot(f1, f2), 0.0f, 1.0f);
+}
+
 
 static __forceinline__ __device__ void transpose(float (& t)[16])
 {
@@ -393,11 +398,6 @@ float3 analyticDirectShade(float3 N, HitGroupData* hit_data)
 	return c;
 }
 
-float3 reflect2(const float3 N, const float3 dir)
-{
-	return (2.0f * dot0(dir, N) * N) - dir;
-}
-
 float3 rotate2(const float3 s, const float3 sRot)
 {
 	float3 a = make_float3(0, 1, 0);
@@ -410,10 +410,15 @@ float3 rotate2(const float3 s, const float3 sRot)
 	return s.x * u + s.y * v + s.z * w;
 }
 
+float3 cartesian(float theta, float phi)
+{
+	return make_float3(cos(phi) * sin(theta), sin(phi) * sin(theta), cos(theta));
+}
+
 float3 phong(const float3 omegaI, const float3 dir, const float3 N, const float3 kd, const float3 ks, const float s)
 {
 	// reflection vector of sample
-	float3 refl = normalize(reflect2(N, -dir));
+	float3 refl = normalize(reflect(dir, N));
 
 	float3 result = kd / PI;						// Lambert shading
 
@@ -439,7 +444,7 @@ float smithG(const float3 v, const float3 N, const float roughness)
 {
 	if (dot(v, N) > 0)
 	{
-		float thetaV = acos(dot(v, N));
+		float thetaV = acos(dot0(v, N));
 		return 2.0f / (1.0f + sqrt( 1.0f + pow(roughness, 2.0f) * pow(tan(thetaV), 2.0f)));
 	}
 	else
@@ -569,7 +574,7 @@ float3 sampleHemisphere(const float3 N, const float3 dir, const HitGroupData* hi
 	float phi = 2.0f * PI * psi2;						// random number between 0 and 2*pi
 
 	// calcualte sample in cartesian coordinates 
-	float3 s = make_float3(cos(phi) * sin(theta), sin(phi) * sin(theta), cos(theta));
+	float3 s = cartesian(theta, phi);
 
 	// Rotate sample and normalize
 	return normalize(rotate2(s, N));
@@ -585,7 +590,7 @@ float3 sampleCosine(const float3 N, const float3 dir, const HitGroupData* hit_da
 	float phi = 2.0f * PI * psi2;						// random number between 0 and 2*pi
 
 	// calcualte sample in cartesian coordinates 
-	float3 s = make_float3(cos(phi) * sin(theta), sin(phi) * sin(theta), cos(theta));
+	float3 s = cartesian(theta, phi);
 
 	// Rotate sample and normalize
 	return normalize(rotate2(s, N));
@@ -601,66 +606,70 @@ float3 samplePhong(const float3 N, const float3 dir, const HitGroupData* hit_dat
 	float psi2 = rnd(td->seed);
 	// rotate sample to be centered about normal N or reflection vector
 	float3 sRot = N;
-	float3 omegaI;			// direction of sample
 
 	psi0 = rnd(td->seed);
 		
 	if (psi0 <= t)
 	{
 		psi1 = pow(psi1, (1.0f / (hit_data->shininess + 1)));
-		sRot = normalize(reflect2(N, -dir)); 
+		sRot = normalize(reflect(dir, N)); 
 	}
 	else
 	{
 		psi1 = sqrt(psi1);
 	}
-	
 
 	float theta = acos(clamp(psi1, 0.0f, 1.0f));		// random number between pi/2 and 0
 	float phi = 2.0f * PI * psi2;						// random number between 0 and 2*pi
 
 	// calcualte sample in cartesian coordinates 
-	float3 s = make_float3(cos(phi) * sin(theta), sin(phi) * sin(theta), cos(theta));
+	float3 s = cartesian(theta, phi);
 
 	// Rotate sample and normalize
-	omegaI = normalize(rotate2(s, sRot));
-	//omegaI = normalize(s);
-	
-
-
-	return omegaI;
+	return normalize(rotate2(s, sRot));
 }
 
 
 float3 sampleGGX(const float3 N, const float3 dir, const HitGroupData* hit_data, TraceData* td, const float t)
 {
-	// randomly generate hemisphere sample
-	float psi1 = rnd(td->seed);
-	float psi2 = rnd(td->seed);
+	float psi0 = rnd(td->seed);
+	float psi1 = clamp(rnd(td->seed), 0.0f, 1.0f);
+	float psi2 = clamp(rnd(td->seed), 0.0f, 1.0f);
 
-	// rotate sample to be centered about normal N or reflection vector
 	float3 omegaI;			// direction of sample
 
-	float psi0 = rnd(td->seed);
 	if (psi0 <= t)
 	{
 		// specular 
-		psi1 = pow(psi1, (1.0f / (hit_data->shininess + 1)));
-
-		float phi = 2.0f * PI * psi2;
 		float theta = atan((hit_data->roughness * sqrt(psi1)) / sqrt(1.0f - psi1));
-		float3 h = make_float3(cos(phi) * sin(theta), sin(phi) * sin(theta), cos(theta));
+		float phi = 2.0f * PI * psi2;
+
+		// produce half vector in cartesian coordinates 
+		float3 h = cartesian(theta, phi);
 		h = rotate2(h, N);
-		omegaI = normalize(reflect2(h, dir));
+		omegaI = reflect(dir, h);
+
+		//omegaI = h;
+
+		//if (isnan(omegaI.x) || isnan(omegaI.y) || isnan(omegaI.z))
+		//uint3 li = optixGetLaunchIndex();
+		//if (li.x % 50 == 0 && li.y % 50 == 0)
+		//{
+			//printf("(%04d, %03d) x %d : [%f, %f, %f] %f [%f, %f]\n",
+			//	li.x, li.y, td->depth, omegaI.x, omegaI.y, omegaI.z, 
+			//	hit_data->roughness, theta, phi);
+		//}
+
+		
 	}
 	else
 	{
 		// diffuse 
-		float theta = acos(clamp(sqrt(psi1), 0.0f, 1.0f));		// random number between pi/2 and 0
-		float phi = 2.0f * PI * psi2;						// random number between 0 and 2*pi
+		float theta = acos(clamp(sqrt(psi1), 0.0f, 1.0f));
+		float phi = 2.0f * PI * psi2;
 
 		// calcualte sample in cartesian coordinates 
-		float3 s = make_float3(cos(phi) * sin(theta), sin(phi) * sin(theta), cos(theta));
+		float3 s = cartesian(theta, phi);
 
 		// Rotate sample and normalize
 		omegaI = normalize(rotate2(s, N));
@@ -701,7 +710,14 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 	const float3 dir = optixGetWorldRayDirection();
 	const float3 P = orig + optixGetRayTmax() * dir; // hit point
 
-	float t = avgf3(hit_data->specular) / (avgf3(hit_data->diffuse) + avgf3(hit_data->specular));
+	float ad = avgf3(hit_data->diffuse);
+	float as = avgf3(hit_data->specular);
+	float t;
+	if (ad + as > 0)
+		t = as / (ad + as);
+	else
+		t = 1;
+
 
 	// Calculate sample
 	float3 omegaI;
@@ -763,7 +779,7 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 	{
 		if (hit_data->brdf_algorithm == PHONG)
 		{
-			float3 refl = normalize(reflect2(N, -dir));
+			float3 refl = normalize(reflect(dir, N));
 			float rDotWi = dot0(refl, omegaI);
 
 			float pdf = (1.0f - t) * (nDotWi / PI) +
@@ -773,17 +789,19 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 		}
 		else if (hit_data->brdf_algorithm == GGX)
 		{
-
 			t = fmax(0.25f, t);
 
-			if (length(hit_data->diffuse) + length(hit_data->specular) <= 0)
-				t = 1;
-
 			float3 h = normalize(omegaI - dir);
-			float pdf = (1.0f - t) * dot(N, omegaI) / PI;
-			pdf += t * microfacetDF(h, N, hit_data->roughness) * dot0(N, h) / (4.0f * dot0(h, omegaI));
+			float pdf = ((1.0f - t) * nDotWi / PI) +
+				(t * microfacetDF(h, N, hit_data->roughness) * dot0(N, h) / (4.0f * dot0(h, omegaI)));
 
 			throughput = (f / pdf) * nDotWi;
+
+			if (length(throughput) == 0 && nDotWi > 0)
+			{
+				printf("%f, %f, %f | %f\n", f.x, f.y, f.z, pdf);
+			}
+
 		}
 	}
 	
