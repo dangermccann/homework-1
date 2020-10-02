@@ -426,7 +426,7 @@ void OptiXTracer::InitSBT(const Scene & scene)
 	hg_sbts.resize(numRecs);
 
 	int idx = 0;
-
+	int primitiveIndex = 0;
 
 	std::list<Sphere>::const_iterator it3;
 	for (it3 = scene.spheres.begin(); it3 != scene.spheres.end(); ++it3)
@@ -435,6 +435,7 @@ void OptiXTracer::InitSBT(const Scene & scene)
 		
 		hg_sbts[idx] = {};
 		hg_sbts[idx].data.primativeType = SPHERE;
+		hg_sbts[idx].data.index = primitiveIndex;
 		hg_sbts[idx].data.sphere.radius = sphere.radius;
 		hg_sbts[idx].data.sphere.center = vtf3(sphere.position);
 		PopulateHitGroupRecord(hg_sbts[idx], sphere);
@@ -445,9 +446,10 @@ void OptiXTracer::InitSBT(const Scene & scene)
 		memcpy(&hg_sbts[idx], &hg_sbts[idx - 1], hitgroup_record_size);
 		OPTIX_CHECK(optixSbtRecordPackHeader(hitgroup_prog_occlusion, &hg_sbts[idx]));
 		idx++;
+		primitiveIndex++;
 	}
 
-
+	primitiveIndex = 0;
 	std::list<Tri>::const_iterator it2;
 	for (it2 = scene.tris.begin(); it2 != scene.tris.end(); ++it2) 
 	{
@@ -455,6 +457,7 @@ void OptiXTracer::InitSBT(const Scene & scene)
 		
 		hg_sbts[idx] = {};
 		hg_sbts[idx].data.primativeType = TRIANGLE;
+		hg_sbts[idx].data.index = primitiveIndex;
 		hg_sbts[idx].data.verticies[0] = vtf3(scene.verticies[tri.one]);
 		hg_sbts[idx].data.verticies[1] = vtf3(scene.verticies[tri.two]);
 		hg_sbts[idx].data.verticies[2] = vtf3(scene.verticies[tri.three]);
@@ -466,9 +469,10 @@ void OptiXTracer::InitSBT(const Scene & scene)
 		memcpy(&hg_sbts[idx], &hg_sbts[idx - 1], hitgroup_record_size);
 		OPTIX_CHECK(optixSbtRecordPackHeader(hitgroup_prog_occlusion, &hg_sbts[idx]));
 		idx++;
+		primitiveIndex++;
 	}
 
-
+	primitiveIndex = 0;
 	std::list<QuadLight>::const_iterator it4;
 	for (it4 = scene.quadLights.begin(); it4 != scene.quadLights.end(); ++it4)
 	{
@@ -477,6 +481,7 @@ void OptiXTracer::InitSBT(const Scene & scene)
 		ql.Verticies(v1, v2, v3, v4);
 
 		hg_sbts[idx].data.primativeType = QUADLIGHT;
+		hg_sbts[idx].data.index = primitiveIndex;
 		hg_sbts[idx].data.verticies[0] = vtf3(v1);
 		hg_sbts[idx].data.verticies[1] = vtf3(v2);
 		hg_sbts[idx].data.verticies[2] = vtf3(v3);
@@ -492,6 +497,7 @@ void OptiXTracer::InitSBT(const Scene & scene)
 
 
 		hg_sbts[idx].data.primativeType = QUADLIGHT;
+		hg_sbts[idx].data.index = primitiveIndex;
 		hg_sbts[idx].data.verticies[0] = vtf3(v3);
 		hg_sbts[idx].data.verticies[1] = vtf3(v4);
 		hg_sbts[idx].data.verticies[2] = vtf3(v1);
@@ -503,7 +509,7 @@ void OptiXTracer::InitSBT(const Scene & scene)
 		memcpy(&hg_sbts[idx], &hg_sbts[idx - 1], hitgroup_record_size);
 		OPTIX_CHECK(optixSbtRecordPackHeader(hitgroup_prog_occlusion, &hg_sbts[idx]));
 		idx++;
-
+		primitiveIndex++;
 	}
 
 

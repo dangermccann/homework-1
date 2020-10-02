@@ -38,6 +38,13 @@ enum BRDFAlgorithm
 	GGX
 };
 
+enum NextEventEstimation
+{
+	OFF = 0,
+	ON = 1,
+	MIS = 2
+};
+
 struct Params
 {
 	uchar4* image;
@@ -82,6 +89,7 @@ struct DSphere
 struct HitGroupData
 {
 	int primativeType;
+	int index;
 	float3 diffuse, specular, emission;
 	float3 ambient;
 	float3 verticies[3];

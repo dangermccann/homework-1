@@ -95,6 +95,8 @@ int Scene::Parse(LPCWSTR path)
 
 					if (onOff == "on")
 						nextEventEstimation = 1;
+					else if (onOff == "mis")
+						nextEventEstimation = 2;
 				}
 				else if (cmd == "russianroulette") {
 					std::string onOff;

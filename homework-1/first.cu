@@ -36,6 +36,10 @@
 
 const float  PI = 3.1415927f;
 
+#define MODE_RADIANCE 1
+#define MODE_OCCLUSION 2
+#define MODE_BRDF_DIRECT 3
+
 extern "C" {
 	__constant__ Params params;
 }
@@ -43,11 +47,12 @@ extern "C" {
 struct TraceData
 {
 	float3 color;
-	float3 origin;
-	float3 normal;
 	float3 throughput;
 	int depth;
 	unsigned int seed;
+	unsigned int mode;
+	float hitT;
+	unsigned int primativeIndex;
 };
 
 
@@ -72,15 +77,6 @@ static __forceinline__ __device__ TraceData* getTraceData()
 	const unsigned int u1 = optixGetPayload_1();
 	return reinterpret_cast<TraceData*>(unpackPointer(u0, u1));
 }
-
-
-static __forceinline__ __device__ void setPayload(float3 p)
-{
-	optixSetPayload_0(float_as_int(p.x));
-	optixSetPayload_1(float_as_int(p.y));
-	optixSetPayload_2(float_as_int(p.z));
-}
-
 
 static __forceinline__ __device__ void computeRay(uint3 idx, float2 subpixel_jitter, uint3 dim, float3& origin, float3& direction)
 {
@@ -163,7 +159,14 @@ static __forceinline__ __device__ bool traceOcclusion(
 	float                  tmin,
 	float                  tmax)
 {
-	unsigned int occluded = 0u;
+
+	TraceData td;
+	td.mode = MODE_OCCLUSION;
+	td.color = make_float3(0);
+
+	unsigned int u0, u1;
+	packPointer(&td, u0, u1);
+
 	optixTrace(
 		handle,
 		ray_origin,
@@ -176,8 +179,9 @@ static __forceinline__ __device__ bool traceOcclusion(
 		RAY_TYPE_OCCLUSION,      // SBT offset
 		RAY_TYPE_COUNT,          // SBT stride
 		RAY_TYPE_OCCLUSION,      // missSBTIndex
-		occluded);
-	return occluded;
+		u0, u1);
+
+	return td.color.x;
 }
 
 
@@ -191,6 +195,7 @@ static __forceinline__ __device__ float3 traceRadiance(
 	float3&				   throughput)
 {
 	TraceData td;
+	td.mode = MODE_RADIANCE;
 	td.depth = depth;
 	td.seed = seed;
 	td.throughput = throughput;
@@ -217,6 +222,38 @@ static __forceinline__ __device__ float3 traceRadiance(
 	return td.color;
 }
 
+static __forceinline__ __device__ float3 traceBRDFDirect(
+	OptixTraversableHandle handle,
+	float3                 ray_origin,
+	float3                 ray_direction,
+	int					   depth,
+	unsigned int&		   seed,
+	float3&				   throughput)
+{
+	TraceData td;
+	td.mode = MODE_BRDF_DIRECT;
+	td.seed = seed;
+
+	unsigned int u0, u1;
+	packPointer(&td, u0, u1);
+
+	optixTrace(
+		handle,
+		ray_origin,
+		ray_direction,
+		0.0f,					// tmin
+		1e16f,					// tmax
+		0.0f,                    // rayTime
+		OptixVisibilityMask(255),
+		OPTIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT,
+		RAY_TYPE_RADIANCE,      // SBT offset
+		RAY_TYPE_COUNT,         // SBT stride
+		RAY_TYPE_RADIANCE,      // missSBTIndex
+		u0, u1);
+
+	seed = td.seed;
+	return td.color;
+}
 
 
 
@@ -339,8 +376,6 @@ float3 rayTracerShade(float3 N, HitGroupData* hit_data)
 	float s = hit_data->specular.x + hit_data->specular.y + hit_data->specular.x;
 	if (s > 0 && td->depth < params.depth)
 	{
-		td->origin = P;
-
 		float3 r = normalize(orig - P);
 		float3 refl = N * 2.0f * dot(r, N) - r;
 		refl = normalize(refl);
@@ -432,12 +467,23 @@ float3 phong(const float3 omegaI, const float3 dir, const float3 N, const float3
 
 float microfacetDF(const float3 h, const float3 N, const float roughness)
 {
+	/*
+	float a2 = roughness * roughness;
+	float NdotH = dot(N, h);
+	float d = ((NdotH * a2 - NdotH) * NdotH + 1);
+	return a2 / (d * d * PI);
+	*/
+
+	
 	float thetaH = acos(dot0(h, N));
 
-	float D = (pow(roughness, 2.0f)) /
-		(PI * pow(cos(thetaH), 4.0f) * pow(pow(roughness, 2.0f) + pow(tan(thetaH), 2.0f), 2.0f));
+	float a2 = roughness * roughness;
+
+	float D = (a2) /
+		(PI * pow(cos(thetaH), 4.0f) * pow(a2 + pow(tan(thetaH), 2.0f), 2.0f));
 	
 	return D;
+	
 }
 
 float smithG(const float3 v, const float3 N, const float roughness)
@@ -640,6 +686,28 @@ float3 sampleGGX(const float3 N, const float3 dir, const HitGroupData* hit_data,
 
 	if (psi0 <= t)
 	{
+		// Get our uniform random numbers
+		// Get an orthonormal basis from the normal
+		/*
+		float3 a = make_float3(0, 1, 0);
+		if (dot(a, N) > 0.9)
+			a = make_float3(1, 0, 0);
+		float3 B = normalize(cross(a, N));
+		float3 T = normalize(cross(B, N));
+
+		// GGX NDF sampling
+		float a2 = hit_data->roughness * hit_data->roughness;
+		float cosThetaH = sqrt(fmax(0.0f, (1.0f - psi1) / ((a2 - 1.0f)*psi1 + 1.0f)));
+		float sinThetaH = sqrt(fmax(0.0f, 1.0f - cosThetaH * cosThetaH));
+		float phiH = psi2 * PI * 2.0f;
+
+		// Get our GGX NDF sample (i.e., the half vector)
+		omegaI = T * (sinThetaH * cos(phiH)) +
+			B * (sinThetaH * sin(phiH)) +
+			N * cosThetaH;
+		*/
+
+		
 		// specular 
 		float theta = atan((hit_data->roughness * sqrt(psi1)) / sqrt(1.0f - psi1));
 		float phi = 2.0f * PI * psi2;
@@ -647,8 +715,8 @@ float3 sampleGGX(const float3 N, const float3 dir, const HitGroupData* hit_data,
 		// produce half vector in cartesian coordinates 
 		float3 h = cartesian(theta, phi);
 		h = rotate2(h, N);
-		omegaI = reflect(dir, h);
 
+		omegaI = reflect(dir, h);
 		//omegaI = h;
 
 		//if (isnan(omegaI.x) || isnan(omegaI.y) || isnan(omegaI.z))
@@ -679,37 +747,11 @@ float3 sampleGGX(const float3 N, const float3 dir, const HitGroupData* hit_data,
 	return omegaI;
 }
 
-
-float3 pathTraceShade(float3 N, HitGroupData* hit_data)
+float3 brdfImportanceSample(HitGroupData* hit_data, TraceData* td, float3 N, float3 dir,
+	int& terminate, float3& omegaI)
 {
-	TraceData* td = getTraceData();
-
-	// Exit on maximum recusion depth
-	int max_depth = params.depth;
-	if (params.nee == 1)
-		max_depth--;
-
-	if (td->depth >= max_depth)
-	{
-		if (params.nee == 1)
-			return make_float3(0);
-		else
-			return hit_data->emission;
-	}
-
-	// Exit if we intersect the light source
-	if (hit_data->primativeType == QUADLIGHT)
-	{
-		if (params.nee == 1)
-			return make_float3(0);
-		else
-			return hit_data->emission;
-	}
-
-	const float3 orig = optixGetWorldRayOrigin();
-	const float3 dir = optixGetWorldRayDirection();
-	const float3 P = orig + optixGetRayTmax() * dir; // hit point
-
+	// Calculate t: the relative specular and to diffuse
+	// of the material
 	float ad = avgf3(hit_data->diffuse);
 	float as = avgf3(hit_data->specular);
 	float t;
@@ -720,7 +762,6 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 
 
 	// Calculate sample
-	float3 omegaI;
 	if (params.importance_sampling == HEMISPHERE)
 	{
 		omegaI = sampleHemisphere(N, dir, hit_data, td, t);
@@ -742,31 +783,29 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 	}
 
 	float nDotWi = dot0(N, omegaI);				// Cosine component
-	
+
 
 	// Evaluate BRDF
 	float3 f;
 	if (hit_data->brdf_algorithm == PHONG)
 	{
-		
+
 		f = phong(omegaI, dir, N, hit_data->diffuse, hit_data->specular, hit_data->shininess);
 	}
 	if (hit_data->brdf_algorithm == GGX)
 	{
-		
+
 		f = ggx(omegaI, dir, N, hit_data->diffuse, hit_data->specular, hit_data->roughness);
 	}
 
 	
-
-
 	// Calculate throughput for current hop in path
 	// At the highest level this is calculated as : f / pdf
 	// Or: the BRDF evaluation divided by the probability distribution function result
 	// We have two BRDF algoritms: Modified Phong and GGX
 	float3 throughput = make_float3(0);
-	
-	
+
+
 	if (params.importance_sampling == HEMISPHERE)
 	{
 		throughput = (2.0f * PI * f * nDotWi);
@@ -792,22 +831,29 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 			t = fmax(0.25f, t);
 
 			float3 h = normalize(omegaI - dir);
-			float pdf = ((1.0f - t) * nDotWi / PI) +
-				(t * microfacetDF(h, N, hit_data->roughness) * dot0(N, h) / (4.0f * dot0(h, omegaI)));
+			float nDotH = dot0(N, h);
 
-			throughput = (f / pdf) * nDotWi;
-
-			if (length(throughput) == 0 && nDotWi > 0)
+			if (abs(nDotH) < 0.001)
 			{
-				printf("%f, %f, %f | %f\n", f.x, f.y, f.z, pdf);
+				throughput = make_float3(0);
 			}
+			else {
+				float D = microfacetDF(h, N, hit_data->roughness);
+				float pdf = ((1.0f - t) * nDotWi / PI) +
+					(t * D * nDotH / (4.0f * dot0(h, omegaI)));
 
+				throughput = (f / pdf) * nDotWi;
+
+
+				if (isnan(pdf))
+				{
+					float thetaH = acos(dot0(h, N));
+
+					printf("%f, %f, %f, %f, %f\n", pdf, cos(thetaH), acos(dot0(h, N)), D, tan(thetaH));
+				}
+			}
 		}
 	}
-	
-	
-
-
 
 	// 
 	// If using Russian Roulette terminate based on probability q
@@ -822,6 +868,7 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 		float p = rnd(td->seed);
 		if (p < q || q >= 1.0f)
 		{
+			terminate = 1;
 			return make_float3(0);			// terminate
 		}
 		else
@@ -832,9 +879,49 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 		throughput *= rrBoost;
 	}
 
+	terminate = 0;
+	return throughput;
+}
+
+
+float3 indirectShade(float3 N, HitGroupData* hit_data)
+{
+	TraceData* td = getTraceData();
+
+	// Exit on maximum recusion depth
+	int max_depth = params.depth;
+	if (params.nee == ON)
+		max_depth--;
+
+	if (td->depth >= max_depth)
+	{
+		if (params.nee == ON)
+			return make_float3(0);
+		else
+			return hit_data->emission;
+	}
+
+	// Exit if we intersect the light source
+	if (hit_data->primativeType == QUADLIGHT)
+	{
+		if (params.nee == ON)
+			return make_float3(0);
+		else
+			return hit_data->emission;
+	}
+
+	const float3 orig = optixGetWorldRayOrigin();
+	const float3 dir = optixGetWorldRayDirection();
+	const float3 P = orig + optixGetRayTmax() * dir; // hit point
+	float3 omegaI;
+	int terminate;
+
+	float3 throughput = brdfImportanceSample(hit_data, td, N, dir, terminate, omegaI);
+
+	if (terminate)
+		return throughput;
 
 	td->throughput *= throughput;
-
 
 	// Recursively sample next color along path
 	float3 nextColor = traceRadiance(params.handle, P + EPSILON * N, omegaI, td->depth + 1, td->seed, td->throughput);
@@ -847,30 +934,93 @@ float3 pathTraceShade(float3 N, HitGroupData* hit_data)
 void shade(float3 N, HitGroupData* hit_data)
 {
 	TraceData* td = getTraceData();
+	td->primativeIndex = hit_data->index;
 
-	if (params.integrator == RAYTRACER) {
+	if (td->mode == MODE_BRDF_DIRECT)
+	{
+		if (hit_data->primativeType == QUADLIGHT)
+		{
+			td->color = make_float3(1);
+		}
+		else
+		{
+			td->color = make_float3(0);
+		}
+	}
+	else if (params.integrator == RAYTRACER) 
+	{
 		td->color = rayTracerShade(N, hit_data);
 	}
-	else if (params.integrator == ANALYTICDIRECT) {
+	else if (params.integrator == ANALYTICDIRECT) 
+	{
 		td->color = analyticDirectShade(N, hit_data);
 	}
-	else if (params.integrator == DIRECT) {
+	else if (params.integrator == DIRECT) 
+	{
 		td->color = directShade(N, hit_data);
 	}
-	else if (params.integrator == PATHTRACER) {
-		if (params.nee == 1) {
+	else if (params.integrator == PATHTRACER) 
+	{
+		if (params.nee == OFF) 
+		{
+			// NEE off, do indirect lighting only 
+			td->color = indirectShade(N, hit_data);
+		}
+		else if (params.nee == ON) 
+		{
 			td->color = make_float3(0);
 
 			if(td->depth == 0)
 				td->color += hit_data->ambient + hit_data->emission;
 
 			td->color += directShade(N, hit_data);
-			td->color += pathTraceShade(N, hit_data);
+			td->color += indirectShade(N, hit_data);
 		}
-		else
+		else if (params.nee == MIS)
 		{
-			// NEE off, do indirect lighting only 
-			td->color = pathTraceShade(N, hit_data);
+			// TODO: move to function 
+			const float3 orig = optixGetWorldRayOrigin();
+			const float3 dir = optixGetWorldRayDirection();
+			const float3 P = orig + optixGetRayTmax() * dir; // hit point
+			float3 omegaI;
+			int terminate;
+
+			float3 throughput = brdfImportanceSample(hit_data, td, N, dir, terminate, omegaI);
+
+			float3 unused;
+			float3 emission = traceBRDFDirect(params.handle, P + EPSILON*N, omegaI, 0, td->seed, unused);
+			
+
+			DQuadLight* dql = (DQuadLight*)params.quadLights;
+			DQuadLight ql = dql[td->primativeIndex];		// Get quad light reference
+			float A = length(ql.ab) * length(ql.ac);		// area of parallelogram
+			float nDotWi = dot0(N, omegaI);					// Cosine component
+			float3 a = ql.a;								// verticies of quad light
+			float3 b = ql.a + ql.ab;
+			float3 c = ql.a + ql.ac;
+			float3 nl = normalize(cross(c - a, b - a));		// surface normal of the area light
+			float LnDotWi = dot0(-nl, omegaI);				// differential omegaI
+			float3 hit = P + omegaI * td->hitT;
+			float R = length(hit - P);
+
+			float3 f;
+			if (hit_data->brdf_algorithm == PHONG)
+			{
+				f = phong(omegaI, dir, N, hit_data->diffuse, hit_data->specular, hit_data->shininess);
+			}
+			else if (hit_data->brdf_algorithm == GGX)
+			{
+				f = ggx(omegaI, dir, N, hit_data->diffuse, hit_data->specular, hit_data->roughness);
+			}
+			// col += f * nDotWi * LnDotWi * ql.intensity * A / (R * R);
+
+			if (length(emission) > 0)
+			{
+				//td->color = f * nDotWi * ql.intensity * A / (R * R);
+				td->color = f * ql.intensity * nDotWi * LnDotWi / (R * R);
+			}
+			else
+				td->color = make_float3(0);
 		}
 	}
 }
@@ -931,7 +1081,8 @@ extern "C" __global__ void __closesthit__primative()
 
 extern "C" __global__ void __closesthit__occlusion()
 {
-	optixSetPayload_0(static_cast<unsigned int>(true));
+	TraceData* td = getTraceData();
+	td->color.x = 1;
 }
 
 
@@ -1032,7 +1183,7 @@ extern "C" __global__ void __intersection__primative()
 	float3 normal;
 	float t;
 	bool hit = false;
-
+	TraceData* td = getTraceData();
 
 	if(hg_data->primativeType == SPHERE) 
 	{
@@ -1044,13 +1195,15 @@ extern "C" __global__ void __intersection__primative()
 	}
 	// Quad lights should not participate in occlusion checks.
 	// Assume that we are doing an occlusion trace based on flags
-	else if (hg_data->primativeType == QUADLIGHT && flags != OPTIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT)
+	else if (hg_data->primativeType == QUADLIGHT && td->mode != MODE_OCCLUSION)
 	{
 		hit = intersect_triangle(hg_data, orig, dir, normal, t);
 	}
 
 	if(hit) 
 	{
+		td->hitT = t;
+
 		// and apply the transpose inverse matrix to the normal
 		float transp[16];
 		copy(hg_data->inverseTransform, transp);
