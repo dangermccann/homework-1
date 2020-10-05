@@ -204,7 +204,7 @@ void OptiXTracer::InitProgram() {
 	pipeline_compile_options.numPayloadValues = 3;
 	pipeline_compile_options.numAttributeValues = 3;
 #ifdef _DEBUG 
-	pipeline_compile_options.exceptionFlags = OPTIX_EXCEPTION_FLAG_DEBUG; // OPTIX_EXCEPTION_FLAG_DEBUG; // OPTIX_EXCEPTION_FLAG_NONE
+	pipeline_compile_options.exceptionFlags = OPTIX_EXCEPTION_FLAG_NONE; // OPTIX_EXCEPTION_FLAG_DEBUG; // OPTIX_EXCEPTION_FLAG_NONE
 #else
 	pipeline_compile_options.exceptionFlags = OPTIX_EXCEPTION_FLAG_STACK_OVERFLOW; // OPTIX_EXCEPTION_FLAG_NONE
 #endif
