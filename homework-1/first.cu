@@ -610,40 +610,40 @@ float ggxPDF(float3 dir, float3 N, float3 omegaI, float t, float roughness)
 	}
 }
 
-float neePDF(float3 omegaI, HitGroupData* hit_data, unsigned int primativeIndex)
+float neePDF(float3 omegaI, float3 P)
 {
 	TraceData* td = getTraceData();
 
-	const float3 orig = optixGetWorldRayOrigin();
-	const float3 dir = optixGetWorldRayDirection();
-	const float  t = optixGetRayTmax();
-	const float3 P = orig + t * dir;					// hit point
-
-	DQuadLight* dql = (DQuadLight*)params.quadLights;
 	float pdf = 0;										// final result
 
-	DQuadLight ql = dql[primativeIndex];
-	float3 nl = quadLightNormal(ql);				// surface normal of the area light
+	DQuadLight* dql = (DQuadLight*)params.quadLights;
 
-	float A = length(ql.ab) * length(ql.ac);		// area of parallelogram
-	//float A = length(cross(ql.ab, ql.ac));
-
-
-	float hitT;
-	float3 result = traceLightSource(params.handle, P, omegaI, primativeIndex, hitT, td->seed);
-	float V = length(result);
-	if (V > 0)
+	for (int k = 0; k < params.quad_light_count; k++)
 	{
-		float3 x1 = P + omegaI * hitT;				// sampled point in light source
-		float R = hitT;								// distance from hit point to light sample
+		DQuadLight ql = dql[k];							// current light 
+		float3 nl = quadLightNormal(ql);				// surface normal of the area light
 
-		float nlDotWi = dot0(-nl, omegaI);
+		float A = length(ql.ab) * length(ql.ac);		// area of parallelogram
+		//float A = length(cross(ql.ab, ql.ac));
 
-		if (nlDotWi > 0)
-			pdf += (R*R) / (A * nlDotWi);
+
+		float hitT;
+		unsigned int lightIndex = k;
+		float3 result = traceLightSource(params.handle, P, omegaI, lightIndex, hitT, td->seed);
+		float V = length(result);
+		if (V > 0)
+		{
+			float3 x1 = P + omegaI * hitT;				// sampled point in light source
+			float R = hitT;								// distance from hit point to light sample
+
+			float nlDotWi = dot0(-nl, omegaI);
+
+			if (nlDotWi > 0)
+				pdf += (R*R) / (A * nlDotWi);
+		}
 	}
 
-	return pdf;
+	return pdf / params.quad_light_count;
 }
 
 
@@ -723,7 +723,7 @@ float3 directShade(float3 N, HitGroupData* hit_data, float& neePdfAvg, float& br
 			col += V * f * nDotWi * LnDotWi / (R * R);	// Put it all together
 
 
-			if (params.nee == MIS && V > 0)
+			if (params.nee == MIS && k == 0 && V > 0)
 			{
 				if (hit_data->brdf_algorithm == PHONG)
 					brdfPdfAvg += phongPDF(dir, N, omegaI, specularRatioT(hit_data), hit_data->shininess);
@@ -731,17 +731,7 @@ float3 directShade(float3 N, HitGroupData* hit_data, float& neePdfAvg, float& br
 					brdfPdfAvg += ggxPDF(dir, N, omegaI, specularRatioT(hit_data), hit_data->roughness);
 
 
-				if (LnDotWi > 0)
-					neePdfAvg += (R*R) / (A * LnDotWi);
-
-
-				//float tt = neePDF(omegaI, hit_data);
-				//if (tt < 0 || tt != ttt)
-				//{
-				//	printf("%f %f | %f, %f, %f\n", tt, ttt, omegaI.x, omegaI.y, omegaI.z);
-				//}
-				//neePdfAvg += ttt;
-				//neePdfAvg += ttt;
+				neePdfAvg += neePDF(omegaI, P);
 			}
 		}
 
@@ -1072,14 +1062,21 @@ float misWeight(float pdfI, float pdfK)
 
 float3 misShade(float3 N, HitGroupData* hit_data, TraceData* td)
 {
+
+	const float3 orig = optixGetWorldRayOrigin();
 	const float3 dir = optixGetWorldRayDirection();
+	const float3 P = orig + optixGetRayTmax() * dir;		// hit point
+
+
 	float weightNEE = 0;
 	float weightBRDF = 0;
 	float3 omegaI;
 	float3 brdfColor, neeColor;
 	float brdfPdf, neePdf;
+	float brdfPdf2, neePdf2;
 	float b = 2.0f;
 	float t = specularRatioT(hit_data);
+	unsigned int uu;
 	unsigned int lightIndex;
 
 	brdfColor = indirectShade(N, hit_data, omegaI, lightIndex);
@@ -1093,28 +1090,39 @@ float3 misShade(float3 N, HitGroupData* hit_data, TraceData* td)
 		brdfPdf = ggxPDF(dir, N, omegaI, t, hit_data->roughness);
 	}
 
-	neePdf = neePDF(omegaI, hit_data, lightIndex);
-	weightBRDF = misWeight(brdfPdf, neePdf);
+	neePdf = neePDF(omegaI, P);
+	
 
-
-
-	//neeColor = directShade(N, hit_data, neePdf, brdfPdf);
-	//weightNEE = misWeight(neePdf, brdfPdf);
+	neeColor = directShade(N, hit_data, neePdf2, brdfPdf2);
+	//td->depth++;
+	//neeColor += indirectShade(N, hit_data, omegaI, uu);
 
 	/*
 	uint3 li = optixGetLaunchIndex();
-	if (li.x % 10 == 0 && li.y % 10 == 0)
+	if (li.x > 575 && li.x < 625 && li.y > 270 && li.y < 320)
 	{
-		printf("(%03d, %03d) : %d : [%f, %f, %f]\n",
-			li.x, li.y, td->primativeIndex, brdfPdf, neePdf, 6);
+		if (li.x % 5 == 0 && li.y % 5 == 0)
+		{
+			printf("(%03d, %03d) : [%f, %f] [%f, %f]\n",
+				li.x, li.y, brdfPdf, neePdf, brdfPdf2, neePdf2);
+		}
 	}
 	*/
 
+	weightNEE = misWeight(neePdf2, brdfPdf);
+	weightBRDF = misWeight(brdfPdf, neePdf2);
+	
 
-	//return weightBRDF * brdfColor + weightNEE * neeColor;
-	return weightBRDF * brdfColor;
-	//return make_float3(neePdf);
+
+	return weightBRDF * brdfColor + weightNEE * neeColor;
 	//return weightNEE * neeColor;
+	//return weightBRDF * brdfColor;
+	//return make_float3(brdfPdf, neePdf2, 0);
+
+	
+
+	
+	
 }
 
 
@@ -1171,7 +1179,11 @@ void shade(float3 N, HitGroupData* hit_data)
 			float3 omegaI;
 			td->color = indirectShade(N, hit_data, omegaI, uu);
 		}
-		else if (params.nee == ON) 
+		else if (params.nee == MIS)
+		{
+			td->color = misShade(N, hit_data, td);
+		}
+		else if(params.nee == ON)
 		{
 			float3 omegaI;
 
@@ -1183,10 +1195,7 @@ void shade(float3 N, HitGroupData* hit_data)
 			td->color += directShade(N, hit_data, u1, u2);
 			td->color += indirectShade(N, hit_data, omegaI, uu);
 		}
-		else if (params.nee == MIS)
-		{
-			td->color = misShade(N, hit_data, td);
-		}
+		
 	}
 }
 
@@ -1251,19 +1260,19 @@ extern "C" __global__ void __closesthit__occlusion()
 }
 
 
-bool intersect_triangle(HitGroupData* hg_data, float3 orig, float3 dir, float3 &normal, float& t)
+bool intersect_triangle(HitGroupData* hg_data, float3 orig, float3 dir, float3& normal, float& t)
 {
 	float3 a = hg_data->verticies[0];
 	float3 b = hg_data->verticies[1];
 	float3 c = hg_data->verticies[2];
-	normal = normalize(cross(c - a, b - a));
+	//normal = normalize(cross(c - a, b - a));
+	normal = normalize(cross(b - a, c - a));
 
 	float dirDotN = dot(dir, normal);
 
 	// No ray-plane intersection (orthogonal)
-	if (dirDotN == 0)
+	if (abs(dirDotN) < EPSILON)
 		return false;
-
 
 	// Calculate distance along ray to intersection point
 	t = (dot(a, normal) - dot(orig, normal)) / dirDotN;
@@ -1273,27 +1282,24 @@ bool intersect_triangle(HitGroupData* hg_data, float3 orig, float3 dir, float3 &
 		return false;
 
 	float3 P = orig + dir * t;
-	
 
 	// Intersection with the triangle's plane, determine if it's inside or outside
-	float3 beta = cross(P - a, b - a);
+	float3 beta = cross(b - a, P - a);
 	if (dot(normal, beta) < 0)
 		return false;
 
-	float3 gamma = cross(P - b, c - b);
+	float3 gamma = cross(c - b, P - b);
 	if (dot(normal, gamma) < 0)
 		return false;
 
-	float3 alpha = cross(P - c, a - c);
+	float3 alpha = cross(a - c, P - c);
 	if (dot(normal, alpha) < 0)
 		return false;
-
-	// TODO: This I don't fully understand.  But I know that the normal is facing the wrong direction
-	// if it is not reversed here.   
-	normal *= -1;
+	
 
 	return true;
 }
+
 
 bool intersect_sphere(HitGroupData* hg_data, float3 orig, float3 dir, float3 &normal, float& t)
 {
@@ -1336,6 +1342,7 @@ bool intersect_sphere(HitGroupData* hg_data, float3 orig, float3 dir, float3 &no
 extern "C" __global__ void __intersection__primative()
 {
 	HitGroupData* hg_data = reinterpret_cast<HitGroupData*>(optixGetSbtDataPointer());
+	
 	float3 orig = optixGetObjectRayOrigin();
 	float3 dir = optixGetObjectRayDirection();
 	unsigned int flags = optixGetRayFlags();
@@ -1349,6 +1356,7 @@ extern "C" __global__ void __intersection__primative()
 	float t;
 	bool hit = false;
 	TraceData* td = getTraceData();
+
 
 	if(hg_data->primativeType == SPHERE) 
 	{

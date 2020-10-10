@@ -41,8 +41,8 @@
   "-default-device", \
   "-rdc", \
   "true", \
-  "-D__x86_64" //, \
-  // "-G"
+  "-D__x86_64"// , \
+   //"-G"
 std::string g_nvrtcLog;
 
 
@@ -191,11 +191,11 @@ void OptiXTracer::InitProgram() {
 	OptixModuleCompileOptions module_compile_options = {};
 	module_compile_options.maxRegisterCount = OPTIX_COMPILE_DEFAULT_MAX_REGISTER_COUNT;
 #ifdef _DEBUG
-	module_compile_options.optLevel = OPTIX_COMPILE_OPTIMIZATION_DEFAULT; // OPTIX_COMPILE_OPTIMIZATION_LEVEL_0;
-	module_compile_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_NONE; // OPTIX_COMPILE_DEBUG_LEVEL_FULL;
+	module_compile_options.optLevel = OPTIX_COMPILE_OPTIMIZATION_LEVEL_0;
+	module_compile_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_LINEINFO; // OPTIX_COMPILE_DEBUG_LEVEL_FULL
 #else
 	module_compile_options.optLevel = OPTIX_COMPILE_OPTIMIZATION_DEFAULT;
-	module_compile_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_LINEINFO;
+	module_compile_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_NONE;
 #endif
 
 
@@ -204,9 +204,9 @@ void OptiXTracer::InitProgram() {
 	pipeline_compile_options.numPayloadValues = 3;
 	pipeline_compile_options.numAttributeValues = 3;
 #ifdef _DEBUG 
-	pipeline_compile_options.exceptionFlags = OPTIX_EXCEPTION_FLAG_NONE; // OPTIX_EXCEPTION_FLAG_DEBUG; // OPTIX_EXCEPTION_FLAG_NONE
+	pipeline_compile_options.exceptionFlags = OPTIX_EXCEPTION_FLAG_TRACE_DEPTH | OPTIX_EXCEPTION_FLAG_DEBUG;
 #else
-	pipeline_compile_options.exceptionFlags = OPTIX_EXCEPTION_FLAG_STACK_OVERFLOW; // OPTIX_EXCEPTION_FLAG_NONE
+	pipeline_compile_options.exceptionFlags = OPTIX_EXCEPTION_FLAG_NONE; // OPTIX_EXCEPTION_FLAG_STACK_OVERFLOW;
 #endif
 
 	pipeline_compile_options.pipelineLaunchParamsVariableName = "params";
@@ -321,9 +321,9 @@ void OptiXTracer::InitProgram() {
 	OptixPipelineLinkOptions pipeline_link_options = {};
 	pipeline_link_options.maxTraceDepth = max_trace_depth;
 #ifdef _DEBUG
-	pipeline_link_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_NONE; // OPTIX_COMPILE_DEBUG_LEVEL_FULL;
+	pipeline_link_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_FULL;
 #else
-	pipeline_link_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_LINEINFO;
+	pipeline_link_options.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_NONE; //  OPTIX_COMPILE_DEBUG_LEVEL_LINEINFO;
 #endif
 	sizeof_log = sizeof(log);
 	OPTIX_CHECK_LOG(optixPipelineCreate(
@@ -663,25 +663,16 @@ void PopulateBuildInput(int buildOffset, int count, std::vector<OptixAabb> &aabb
 void BuildTriangleAABB(Vector3 v1, Vector3 v2, Vector3 v3, Transform transform, 
 	int count, std::vector<OptixAabb>& aabbs)
 {
-	Vector3 boxMin, boxMax;
-
-	boxMin.x = minf(minf(v1.x, v2.x), v3.x);
-	boxMin.y = minf(minf(v1.y, v2.y), v3.y);
-	boxMin.z = minf(minf(v1.z, v2.z), v3.z);
-	boxMax.x = maxf(maxf(v1.x, v2.x), v3.x);
-	boxMax.y = maxf(maxf(v1.y, v2.y), v3.y);
-	boxMax.x = maxf(maxf(v1.z, v2.z), v3.z);
-
-
-	boxMin = boxMin.ApplyTransformation(transform);
-	boxMax = boxMax.ApplyTransformation(transform);
-
-	aabbs[count].minX = minf(boxMin.x, boxMax.x);
-	aabbs[count].minY = minf(boxMin.y, boxMax.y);
-	aabbs[count].minZ = minf(boxMin.z, boxMax.z);
-	aabbs[count].maxX = maxf(boxMin.x, boxMax.x);
-	aabbs[count].maxY = maxf(boxMin.y, boxMax.y);
-	aabbs[count].maxZ = maxf(boxMin.z, boxMax.z);
+	v1 = v1.ApplyTransformation(transform);
+	v2 = v2.ApplyTransformation(transform);
+	v3 = v3.ApplyTransformation(transform);
+	
+	aabbs[count].minX = minf(minf(v1.x, v2.x), v3.x);
+	aabbs[count].minY = minf(minf(v1.y, v2.y), v3.y);
+	aabbs[count].minZ = minf(minf(v1.z, v2.z), v3.z);
+	aabbs[count].maxX = maxf(maxf(v1.x, v2.x), v3.x);
+	aabbs[count].maxY = maxf(maxf(v1.y, v2.y), v3.y);
+	aabbs[count].maxZ = maxf(maxf(v1.z, v2.z), v3.z);
 }
 
 void OptiXTracer::BuildPrimativeGAS(const Scene & scene) 
@@ -743,13 +734,10 @@ void OptiXTracer::BuildPrimativeGAS(const Scene & scene)
 
 			float radius = sphere.radius;
 
+			Vector3 spTrans = sphere.position.ApplyTransformation(sphere.transform);
 
-			Vector3 boxMin = Vector3(sphere.position.x - radius, sphere.position.y - radius, sphere.position.z - radius);
-			Vector3 boxMax = Vector3(sphere.position.x + radius, sphere.position.y + radius, sphere.position.z + radius);
-
-
-			boxMin = boxMin.ApplyTransformation(sphere.transform);
-			boxMax = boxMax.ApplyTransformation(sphere.transform);
+			Vector3 boxMin = Vector3(spTrans.x - radius, spTrans.y - radius, spTrans.z - radius);
+			Vector3 boxMax = Vector3(spTrans.x + radius, spTrans.y + radius, spTrans.z + radius);
 
 			aabbs[count].minX = minf(boxMin.x, boxMax.x);
 			aabbs[count].minY = minf(boxMin.y, boxMax.y);
