@@ -23,3 +23,4 @@
 #define RT_HEIGHT 480
 
 const float  PI = 3.1415927f;
+#define MAX_DEPTH 31

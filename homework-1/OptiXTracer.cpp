@@ -1,7 +1,5 @@
 #include "stdafx.h"
 
-
-
 #include <optix.h>
 #include <optix_function_table_definition.h>
 #include <optix_stubs.h>
@@ -149,6 +147,26 @@ void compilePTX(const char* name, const char* cuSource, std::string& ptx, const 
 	code = nvrtcDestroyProgram(&prog);
 }
 
+void createModule(OptixPipelineCompileOptions pipeline_compile_options, OptixModuleCompileOptions module_compile_options,
+	OptixDeviceContext context, OptixModule& module, const char* file, char* log)
+{
+	std::string cu, ptx;
+	readCU(file, cu);
+	compilePTX(file, cu.c_str(), ptx, (const char**)&log);
+	size_t sizeof_log = sizeof(log);
+
+	OPTIX_CHECK_LOG(optixModuleCreateFromPTX(
+		context,
+		&module_compile_options,
+		&pipeline_compile_options,
+		ptx.c_str(),
+		ptx.size(),
+		log,
+		&sizeof_log,
+		&module
+	));
+}
+
 
 OptiXTracer::OptiXTracer()
 {
@@ -211,28 +229,17 @@ void OptiXTracer::InitProgram() {
 
 	pipeline_compile_options.pipelineLaunchParamsVariableName = "params";
 
-	std::string cu, ptx;
-	readCU("first.cu", cu);
-	compilePTX("first", cu.c_str(), ptx, (const char**)&log);
-	sizeof_log = sizeof(log);
-
-	OPTIX_CHECK_LOG(optixModuleCreateFromPTX(
-		context,
-		&module_compile_options,
-		&pipeline_compile_options,
-		ptx.c_str(),
-		ptx.size(),
-		log,
-		&sizeof_log,
-		&module
-	));
+	
+	createModule(pipeline_compile_options, module_compile_options, context, raygen_module, "raygen.cu", log);
+	createModule(pipeline_compile_options, module_compile_options, context, intersect_module, "intersect.cu", log);
+	createModule(pipeline_compile_options, module_compile_options, context, shader_module, "shader.cu", log);
 
 
 	OptixProgramGroupOptions program_group_options = {}; // Initialize to zeros
 
 	OptixProgramGroupDesc raygen_prog_group_desc = {}; //
 	raygen_prog_group_desc.kind = OPTIX_PROGRAM_GROUP_KIND_RAYGEN;
-	raygen_prog_group_desc.raygen.module = module;
+	raygen_prog_group_desc.raygen.module = raygen_module;
 	raygen_prog_group_desc.raygen.entryFunctionName = "__raygen__rg";
 	sizeof_log = sizeof(log);
 	OPTIX_CHECK_LOG(optixProgramGroupCreate(
@@ -248,7 +255,7 @@ void OptiXTracer::InitProgram() {
 	// Leave miss group's module and entryfunc name null
 	OptixProgramGroupDesc miss_prog_group_desc = {};
 	miss_prog_group_desc.kind = OPTIX_PROGRAM_GROUP_KIND_MISS;
-	miss_prog_group_desc.raygen.module = module;
+	miss_prog_group_desc.raygen.module = raygen_module;
 	miss_prog_group_desc.raygen.entryFunctionName = "__miss__ms";
 	sizeof_log = sizeof(log);
 	OPTIX_CHECK_LOG(optixProgramGroupCreate(
@@ -264,9 +271,9 @@ void OptiXTracer::InitProgram() {
 	// Primative hitgroup
 	OptixProgramGroupDesc hitgroup_primative_desc = {};
 	hitgroup_primative_desc.kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP;
-	hitgroup_primative_desc.hitgroup.moduleCH = module;
+	hitgroup_primative_desc.hitgroup.moduleCH = shader_module;
 	hitgroup_primative_desc.hitgroup.entryFunctionNameCH = "__closesthit__primative";
-	hitgroup_primative_desc.hitgroup.moduleIS = module;
+	hitgroup_primative_desc.hitgroup.moduleIS = intersect_module;
 	hitgroup_primative_desc.hitgroup.entryFunctionNameIS = "__intersection__primative";
 	hitgroup_primative_desc.hitgroup.moduleAH = nullptr;
 	hitgroup_primative_desc.hitgroup.entryFunctionNameAH = nullptr;
@@ -285,9 +292,9 @@ void OptiXTracer::InitProgram() {
 	// Occlusion hit group
 	OptixProgramGroupDesc hitgroup_occlusion_desc = {};
 	hitgroup_occlusion_desc.kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP;
-	hitgroup_occlusion_desc.hitgroup.moduleCH = module;
+	hitgroup_occlusion_desc.hitgroup.moduleCH = shader_module;
 	hitgroup_occlusion_desc.hitgroup.entryFunctionNameCH = "__closesthit__occlusion";
-	hitgroup_occlusion_desc.hitgroup.moduleIS = module;
+	hitgroup_occlusion_desc.hitgroup.moduleIS = intersect_module;
 	hitgroup_occlusion_desc.hitgroup.entryFunctionNameIS = "__intersection__primative";
 	hitgroup_occlusion_desc.hitgroup.moduleAH = nullptr;
 	hitgroup_occlusion_desc.hitgroup.entryFunctionNameAH = nullptr;
@@ -310,7 +317,7 @@ void OptiXTracer::InitProgram() {
 	//
 	// Link pipeline
 	//
-	const uint32_t    max_trace_depth = 31;
+	const uint32_t    max_trace_depth = MAX_DEPTH;
 	OptixProgramGroup program_groups[] = { 
 		raygen_prog_group, miss_prog_group, 
 		hitgroup_prog_primative, 
@@ -939,7 +946,10 @@ void OptiXTracer::Trace(const Scene & scene)
 	height = scene.height;
 	params.image_width = scene.width;
 	params.image_height = scene.height;
-	params.depth = scene.maxDepth < 0 ? 31 : scene.maxDepth;
+	if (scene.maxDepth < 0 || scene.maxDepth > MAX_DEPTH - 1)
+		params.depth = MAX_DEPTH - 1;
+	else
+			params.depth = scene.maxDepth;
 
 	if (scene.integrator == "raytracer") {
 		params.integrator = RAYTRACER;
@@ -1050,6 +1060,8 @@ void OptiXTracer::Cleanup()
 	OPTIX_CHECK(optixProgramGroupDestroy(miss_prog_group));
 	OPTIX_CHECK(optixProgramGroupDestroy(raygen_prog_group));
 
-	OPTIX_CHECK(optixModuleDestroy(module));
+	OPTIX_CHECK(optixModuleDestroy(raygen_module));
+	OPTIX_CHECK(optixModuleDestroy(intersect_module));
+	OPTIX_CHECK(optixModuleDestroy(shader_module));
 	OPTIX_CHECK(optixDeviceContextDestroy(context));
 }

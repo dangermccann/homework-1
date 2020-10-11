@@ -102,8 +102,10 @@ int Scene::Parse(LPCWSTR path)
 					std::string onOff;
 					s >> onOff;
 
-					if (onOff == "on")
+					if (onOff == "on") {
 						russianRoulette = 1;
+						maxDepth = MAX_DEPTH;
+					}
 				}
 				else if (cmd == "importancesampling") {
 					std::string is;

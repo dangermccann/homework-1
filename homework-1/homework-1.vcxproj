@@ -167,6 +167,7 @@
   <ItemGroup>
     <ClInclude Include="Color.h" />
     <ClInclude Include="FreeImage.h" />
+    <ClInclude Include="helpers.h" />
     <ClInclude Include="homework-1.h" />
     <ClInclude Include="OptiXTracer.h" />
     <ClInclude Include="RayTracer.h" />
@@ -230,10 +231,16 @@
     <None Include="..\testscenes\scene1.test" />
     <None Include="..\testscenes\scene2.test" />
     <None Include="..\testscenes\scene3.test" />
-    <ClInclude Include="first.cu">
+    <ClInclude Include="shader.cu">
       <FileType>CppHeader</FileType>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</ExcludedFromBuild>
     </ClInclude>
+    <None Include="intersect.cu">
+      <FileType>CppHeader</FileType>
+    </None>
+    <None Include="raygen.cu">
+      <FileType>CppHeader</FileType>
+    </None>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

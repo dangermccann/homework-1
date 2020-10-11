@@ -6,7 +6,6 @@
 
 #include "Types.h"
 
-
 template <typename T>
 struct SbtRecord
 {
@@ -35,7 +34,7 @@ public:
 private:
 	int width, height;
 	OptixDeviceContext context = nullptr;
-	OptixModule module = nullptr;
+	OptixModule raygen_module, intersect_module, shader_module = nullptr;
 	OptixProgramGroup raygen_prog_group = nullptr;
 	OptixProgramGroup miss_prog_group = nullptr;
 	OptixProgramGroup hitgroup_prog_primative = nullptr;

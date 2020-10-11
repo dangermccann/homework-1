@@ -51,16 +51,19 @@
     <ClInclude Include="targetver.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Types.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Transform.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Vector3.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="first.cu">
+    <ClInclude Include="shader.cu">
+      <Filter>CUDA Files</Filter>
+    </ClInclude>
+    <ClInclude Include="helpers.h">
+      <Filter>CUDA Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Types.h">
       <Filter>CUDA Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -180,6 +183,12 @@
     </None>
     <None Include="..\hw4-scenes\mis.test">
       <Filter>HW4 Scenes</Filter>
+    </None>
+    <None Include="raygen.cu">
+      <Filter>CUDA Files</Filter>
+    </None>
+    <None Include="intersect.cu">
+      <Filter>CUDA Files</Filter>
     </None>
   </ItemGroup>
   <ItemGroup>
