@@ -165,6 +165,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="CameraAnimator.h" />
     <ClInclude Include="Color.h" />
     <ClInclude Include="FreeImage.h" />
     <ClInclude Include="helpers.h" />
@@ -180,6 +181,7 @@
     <ClInclude Include="Vector3.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="CameraAnimator.cpp" />
     <ClCompile Include="homework-1.cpp" />
     <ClCompile Include="OptiXTracer.cpp" />
     <ClCompile Include="RayTracer.cpp" />

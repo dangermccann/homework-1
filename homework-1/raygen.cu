@@ -18,7 +18,7 @@ __global__ void __raygen__rg()
 	// First ray goes through the center of the pixel
 	float2 subpixel_jitter = make_float2(0.5f);
 
-	unsigned int seed = tea<8>(idx.y * params.image_width + idx.x, idx.x ^ idx.y);
+	unsigned int seed = tea<8>(idx.y * params.image_width + idx.x, params.subframe_index);
 
 	// Map our launch idx to a screen location and create a ray from the camera
 	// location through the screen

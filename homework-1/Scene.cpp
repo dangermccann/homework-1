@@ -124,6 +124,8 @@ int Scene::Parse(LPCWSTR path)
 
 					if (brdfVal == "ggx")
 						material.brdfAlgorithm = 1;
+					else
+						material.brdfAlgorithm = 0;
 				}
 				else if (cmd == "gamma") {
 					if (ReadVals(s, 1, values)) {

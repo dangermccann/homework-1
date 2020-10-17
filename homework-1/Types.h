@@ -50,6 +50,7 @@ struct Params
 	uchar4* image;
 	uchar4* lights;
 	uchar4* quadLights;
+	unsigned int subframe_index;
 	unsigned int light_count;
 	unsigned int quad_light_count;
 	unsigned int image_width;

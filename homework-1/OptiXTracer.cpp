@@ -942,6 +942,7 @@ void OptiXTracer::BuildPrimativeGAS(const Scene & scene)
 
 void OptiXTracer::Trace(const Scene & scene)
 {
+	params.subframe_index = 0;
 	width = scene.width;
 	height = scene.height;
 	params.image_width = scene.width;
@@ -978,14 +979,20 @@ void OptiXTracer::Trace(const Scene & scene)
 
 	InitSBT(scene);
 
+	Launch();
+}
+
+void OptiXTracer::Launch()
+{
+	progress = 0;
 
 	uchar4* device_pixels = nullptr;
 
 	CUDA_CHECK(cudaMalloc(
-		reinterpret_cast<void**>(&device_pixels), width*height * sizeof(uchar4)
+		reinterpret_cast<void**>(&device_pixels), width * height * sizeof(uchar4)
 	));
 
-	host_pixels.resize(width*height);
+	host_pixels.resize(width * height);
 
 	// Create stream
 	CUstream stream;
@@ -1010,7 +1017,7 @@ void OptiXTracer::Trace(const Scene & scene)
 	CUDA_CHECK(cudaMemcpy(
 		static_cast<void*>(host_pixels.data()),
 		device_pixels,
-		width*height * sizeof(uchar4),
+		width * height * sizeof(uchar4),
 		cudaMemcpyDeviceToHost
 	));
 
@@ -1018,8 +1025,8 @@ void OptiXTracer::Trace(const Scene & scene)
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(device_pixels)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(d_param)));
 
+	params.subframe_index++;
 	progress = 1;
-	
 }
 
 void OptiXTracer::Fill(COLORREF* arr) 

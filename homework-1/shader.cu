@@ -263,14 +263,6 @@ float3 phong(const float3 omegaI, const float3 dir, const float3 N, const float3
 
 float microfacetDF(const float3 h, const float3 N, const float roughness)
 {
-	/*
-	float a2 = roughness * roughness;
-	float NdotH = dot(N, h);
-	float d = ((NdotH * a2 - NdotH) * NdotH + 1);
-	return a2 / (d * d * PI);
-	*/
-
-	
 	float thetaH = acos(dot0(h, N));
 
 	if (isnan(thetaH))
@@ -376,51 +368,6 @@ float ggxPDF(float3 dir, float3 N, float3 omegaI, float t, float roughness)
 
 		return pdf;
 	}
-}
-
-float neePDF3(float3 omegaI, float R, unsigned int lightIndex)
-{
-	DQuadLight* dql = (DQuadLight*)params.quadLights;
-
-	DQuadLight ql = dql[lightIndex];							// current light 
-	float3 nl = quadLightNormal(ql);				// surface normal of the area light
-	float A = length(ql.ab) * length(ql.ac);		// area of parallelogram
-	float nlDotWi = dot0(-nl, omegaI);
-
-	if (nlDotWi > 0)
-		return (R * R) / (A * nlDotWi);
-	return 0;
-}
-
-float neePDF2(float3 omegaI, float3 P, unsigned int lightIndex)
-{
-	TraceData* td = getTraceData();
-
-	float pdf = 0;										// final result
-
-	DQuadLight* dql = (DQuadLight*)params.quadLights;
-	
-	DQuadLight ql = dql[lightIndex];							// current light 
-	float3 nl = quadLightNormal(ql);				// surface normal of the area light
-
-	float A = length(ql.ab) * length(ql.ac);		// area of parallelogram
-	//float A = length(cross(ql.ab, ql.ac));
-
-	float hitT;
-	float3 result = traceLightSource(params.handle, P, omegaI, lightIndex, hitT, td->seed);
-	float V = length(result);
-	if (V > 0)
-	{
-		float3 x1 = P + omegaI * hitT;				// sampled point in light source
-		float R = hitT;								// distance from hit point to light sample
-
-		float nlDotWi = dot0(-nl, omegaI);
-
-		if (nlDotWi > 0)
-			pdf += (R * R) / (A * nlDotWi);
-	}
-
-	return pdf;
 }
 
 float neePDF(float3 omegaI, float3 P)
@@ -842,17 +789,10 @@ float3 indirectShade(float3 N, HitGroupData* hit_data)
 	// Recursively sample next color along path
 	float3 nextColor = traceRadiance(params.handle, P, omegaI, td->depth + 1, td->seed, td->throughput);
 
-
 	float weightBRDF = 1;
 	if (params.nee == MIS)
 	{
 		float lightProbability = neePDF(omegaI, P);
-		//float lightProbability = neePDF2(omegaI, P, lightIndex);
-		//float R = length(P - hitT);
-		//float lightProbability = neePDF3(omegaI, R, lightIndex);
-		//if(lightProbability == 0)
-		//	return make_float3(0);
-
 		weightBRDF = misWeight(brdfProbability, lightProbability);
 	}
 
@@ -861,54 +801,6 @@ float3 indirectShade(float3 N, HitGroupData* hit_data)
 }
 
 
-
-float3 misIndirectLight(float3 N, HitGroupData* hit_data, TraceData* td)
-{
-	const float3 orig = optixGetWorldRayOrigin();
-	const float3 dir = optixGetWorldRayDirection();
-	const float3 P = orig + optixGetRayTmax() * dir;		// hit point
-
-
-	const float t = specularRatioT(hit_data);
-	float3 brdfDirection = sample(N, dir, hit_data, td, t);
-
-	
-	unsigned int lightIndex = NO_INDEX;
-	float hitT;
-	float3 hit = traceLightSource(params.handle, P, brdfDirection, lightIndex, hitT, td->seed);
-	if(length(hit) == 0)
-		return make_float3(0);
-
-	DQuadLight* dql = (DQuadLight*)params.quadLights;
-	DQuadLight ql = dql[lightIndex];
-
-
-	float brdfProbability = brdfPdf(brdfDirection, N, dir, t, hit_data);
-	if(brdfProbability == 0)
-		return make_float3(0);
-
-
-	float3 f = evalBRDF(brdfDirection, N, dir, hit_data);
-
-	float lightProbability = neePDF(brdfDirection, P);
-	//float lightProbability = neePDF2(brdfDirection, P, lightIndex);
-	//float R = length(P - hitT);
-	//float lightProbability = neePDF3(brdfDirection, R, lightIndex);
-	//if(lightProbability == 0)
-	//	return make_float3(0);
-
-	float weightBRDF = misWeight(brdfProbability, lightProbability);
-
-	float3 brdfColor = (f * ql.intensity * dot0(N, brdfDirection) * weightBRDF) / brdfProbability;
-
-
-	if (isnan(brdfColor.x) || isinf(brdfColor.x))
-	{
-		printf("brdfColor %f | %f \n", brdfColor.x, weightBRDF);
-	}
-
-	return brdfColor;
-}
 
 /// ---------------------------------- ////
 
@@ -1023,18 +915,12 @@ void shade(float3 N, HitGroupData* hit_data)
 		{
 			td->color = make_float3(0);
 
-			//td->color = misIndirectLight(N, hit_data, td) + misDirectLight(N, hit_data, td);
-
-			//if (td->depth == 0)
-			//	td->color += hit_data->ambient + hit_data->emission;
-
-			//if (td->depth == 0)
+			if (td->depth == 0 || params.depth > 1)
 			{
 				td->color += misDirectLight(N, hit_data, td);
 			}
-			//td->color += misIndirectLight(N, hit_data, td);
-			td->color += indirectShade(N, hit_data);
-			
+
+			td->color += indirectShade(N, hit_data);			
 			
 		}
 		else if(params.nee == ON)
@@ -1050,37 +936,6 @@ void shade(float3 N, HitGroupData* hit_data)
 		
 	}
 }
-
-
-/*
-
-	if (0)
-	{
-		uint3 li = optixGetLaunchIndex();
-		if (li.x % 50 == 0 && li.y % 50 == 0)
-		{
-			float3 ct = td->throughput;
-
-			printf("(%03d, %03d) x %d : [%f, %f, %f] %d [%f, %f, %f]\n",
-				li.x, li.y, td->depth, pt.x, pt.y, pt.z, rrTerminate,
-				ct.x, ct.y, ct.z);
-		}
-	}
-
-
-
-
-
-
-void printRay(float3 orig, float3 dir)
-{
-	printf("origin: %f, %f, %f | dir: %f, %f, %f \n", orig.x, orig.y, orig.z, dir.x, dir.y, dir.z);
-}
-
-
-	*/
-
-
 
 
 extern "C" __global__ void __closesthit__primative()

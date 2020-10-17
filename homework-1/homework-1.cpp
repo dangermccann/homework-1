@@ -7,9 +7,11 @@
 #include "Scene.h"
 #include "RayTracer.h"
 #include "OptiXTracer.h"
+#include "CameraAnimator.h"
+#include "resource.h"
 
 #define MAX_LOADSTRING 100
-
+#define RENDER_LOOP 0
 
 
 // Global Variables:
@@ -28,6 +30,7 @@ void				SetClientSize(int width, int height);
 void				DrawToScreen(HDC hdc);
 int					LoadScene(LPCTSTR file);
 void				ShowError(int err);
+void				Relaunch();
 int					SaveImage(const char* filename, int width, int height, COLORREF* colorBuffer);
 DWORD WINAPI		TracerThread(LPVOID lpParam);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
@@ -39,6 +42,7 @@ OptiXTracer optixTracer;
 Scene scene;
 HWND hwndMain, hwndStatusBar; 
 HANDLE tracerThread;
+int exiting;
 
 int main() {
 	return _tWinMain(GetModuleHandle(NULL), NULL, GetCommandLine(), SW_SHOW);
@@ -52,6 +56,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     UNREFERENCED_PARAMETER(hPrevInstance);
     UNREFERENCED_PARAMETER(lpCmdLine);
 
+	exiting = 0;
 	FreeImage_Initialise();
 
 
@@ -99,6 +104,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             DispatchMessage(&msg);
         }
     }
+
+	exiting = 1;
 
 	if(tracerThread != 0)
 		WaitForSingleObject(tracerThread, 3000);
@@ -247,10 +254,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             // Parse the menu selections:
             switch (wmId)
             {
+			case ID_TRACER_TRACE:
+				Relaunch();
+				break;
             case IDM_ABOUT:
                 DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
                 break;
             case IDM_EXIT:
+				exiting = 1;
                 DestroyWindow(hWnd);
                 break;
             default:
@@ -327,9 +338,11 @@ void DrawToScreen(HDC hdc) {
 	DeleteDC(src); // Deleting temp HDC
 
 
-	if (scene.outputFileName.length() > 0)
-		SaveImage(scene.outputFileName.c_str(), scene.width, scene.height, arr);
-
+	if (!RENDER_LOOP)
+	{
+		if (scene.outputFileName.length() > 0)
+			SaveImage(scene.outputFileName.c_str(), scene.width, scene.height, arr);
+	}
 
 	free(arr);
 }
@@ -367,7 +380,50 @@ DWORD WINAPI TracerThread(LPVOID lpParam) {
 	wsprintf(szTemp, L"Complete in %I64d ms", ElapsedMicroseconds.QuadPart/1000);
 	SetStatusText(szTemp);
 
+	if (RENDER_LOOP)
+	{
+		DWORD start = GetTickCount();
+		CameraAnimator animator(&scene.camera, 0.25f);
+		while (!exiting)
+		{
+			Sleep(5);
+			int deltaTime = (float)(GetTickCount() - start);
+			start = GetTickCount();
+
+			animator.Animate(0.01f);
+
+			optixTracer.SetupCamera(scene);
+			optixTracer.Launch();
+			RedrawWindow(hwndMain, NULL, NULL, RDW_INVALIDATE);
+
+			wsprintf(szTemp, L"Redraw in %I64d ms", deltaTime);
+			SetStatusText(szTemp);
+		}
+	}
+
 	return 0;
+}
+
+void Relaunch()
+{
+	SetStatusText(L"Launching...");
+
+	LARGE_INTEGER StartingTime, EndingTime, ElapsedMicroseconds, Frequency;
+	QueryPerformanceFrequency(&Frequency);
+	QueryPerformanceCounter(&StartingTime);
+
+	optixTracer.Launch();
+
+	QueryPerformanceCounter(&EndingTime);
+	ElapsedMicroseconds.QuadPart = EndingTime.QuadPart - StartingTime.QuadPart;
+	ElapsedMicroseconds.QuadPart *= 1000000;
+	ElapsedMicroseconds.QuadPart /= Frequency.QuadPart;
+
+	RedrawWindow(hwndMain, NULL, NULL, RDW_INVALIDATE);
+
+	WCHAR szTemp[100];
+	wsprintf(szTemp, L"Complete in %I64d ms", ElapsedMicroseconds.QuadPart / 1000);
+	SetStatusText(szTemp);
 }
 
 

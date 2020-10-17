@@ -25,8 +25,10 @@ public:
 	virtual ~OptiXTracer();
 
 	void Trace(const Scene & scene);
+	void Launch();
 	void Fill(COLORREF* arr);	
 	void Cleanup();
+	void SetupCamera(const Scene& scene);
 
 	float progress;
 	bool isRunning;
@@ -51,7 +53,6 @@ private:
 	void InitSBT(const Scene & scene);
 	void BuildTriangleGAS(const Scene & scene);
 	void BuildPrimativeGAS(const Scene & scene);
-	void SetupCamera(const Scene & scene);
 	void SetupLights(const Scene & scene);
 };
 
